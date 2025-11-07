@@ -29,6 +29,7 @@ from ini_juez import InicioSesionJuezScreen
 from cuenta import VerInfoScreen
 from actualizar_torneos import ActualizarTorneoScreen
 from actualizar import ActualizarDatosScreen
+from api_client import api
 
 
 # ------------------ UTILIDADES MULTIPLATAFORMA ------------------
@@ -635,6 +636,10 @@ class MainInScreen(Screen):
 
 # ------------------ APLICACIÓN ------------------
 class MyApp(App):
+
+    LOGIN_SCREEN_NAME = 'main'
+    auth = None
+
     def build(self):
         # Configuración de ventana inicial multiplataforma
         if ResponsiveHelper.is_desktop():
@@ -678,6 +683,34 @@ class MyApp(App):
         )
         sm.add_widget(screen)
         sm.current = 'actualizar_torneos'
+
+    def logout(self, call_backend=True):
+        """
+        Cierra sesión de forma segura:
+        - Intenta informar al backend (si call_backend=True).
+        - Limpia token local y estado de auth.
+        - Navega a LOGIN_SCREEN_NAME.
+        """
+        try:
+            if call_backend:
+                try:
+                    api.post_logout()  # no interrumpimos si falla
+                except Exception:
+                    pass
+        finally:
+            # borra token y estado local
+            try:
+                api.clear_token()
+            except Exception:
+                pass
+            self.auth = None
+
+            # Navega de vuelta a la pantalla de landing/login
+            if self.root and self.root.has_screen(self.LOGIN_SCREEN_NAME):
+                self.root.current = self.LOGIN_SCREEN_NAME
+            elif self.root and getattr(self.root, 'screen_names', None):
+                # fallback defensivo
+                self.root.current = self.root.screen_names[0]
 
 
 if __name__ == '__main__':

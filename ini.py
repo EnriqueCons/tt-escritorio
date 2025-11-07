@@ -12,7 +12,7 @@ from kivy.metrics import dp, sp
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.utils import platform
-
+from api_client import api
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
 class ResponsiveHelper:
@@ -319,8 +319,11 @@ class NavbarAuth(BoxLayout):
         self.popup.open()
 
     def cerrar_sesion(self, instance):
-        self.popup.dismiss()
-        App.get_running_app().root.current = 'main'
+        if hasattr(self, 'popup') and self.popup:
+            self.popup.dismiss()
+        app = App.get_running_app()
+        # Llamar al App real (MyApp) una sola vez y fuera del popup:
+        Clock.schedule_once(lambda dt: app.logout(call_backend=False), 0)
 
 
 # ------------------ PANTALLA PRINCIPAL RESPONSIVE ------------------
@@ -388,8 +391,7 @@ class MainInAuthScreen(Screen):
             min_height = max(Window.height, self.content_layout.height)
             self.content_container.height = min_height
         
-        self.content_container.bind(minimum_height=update_min_height)
-        Window.bind(on_resize=lambda *args: update_min_height(None, None))
+        self.content_container.bind(minimum_height=self.content_container.setter('height'))
         
         # Fondo blanco también en el content_container
         with self.content_container.canvas.before:
@@ -538,6 +540,26 @@ class MainApp(App):
         sm.add_widget(MainInAuthScreen(name='main_auth'))
         return sm
 
+    LOGIN_SCREEN_NAME='main'
+
+    auth = None
+
+    def logout(self, call_backend=True):
+        try:
+            if call_backend:
+                try:
+                    
+                    api.post_logout()
+                except Exception:
+                    pass
+        finally:
+            try:
+                api.clear_token()
+            except Exception:
+                pass
+            self.auth = None
+            if self.root.has_screen(self.LOGIN_SCREEN_NAME):
+                self.root.current = self.LOGIN_SCREEN_NAME
 
 if __name__ == '__main__':
     MainApp().run()
