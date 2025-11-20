@@ -68,5 +68,26 @@ class ApiClient:
             headers=h,
             timeout=timeout or getattr(self, "timeout", 15)
         )
+    
+    def create_combate(self, payload: dict, timeout=15) -> dict:
+        """
+        POST /apiCombates/combate
+        Devuelve el JSON del combate creado (incluyendo su id).
+        """
+        r = self.post_json("/apiCombates/combate", payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def prepare_combate(self, combate_id: int, timeout=10) -> str:
+        """
+        POST /apiCombates/combate/{id}/prepare
+        Prepara el registro de sockets (rojo/azul) para ese combate.
+        """
+        url = f"{self.base_url}/apiCombates/combate/{combate_id}/prepare"
+        r = self.session.post(url, headers=self.headers(), timeout=timeout)
+        if r.status_code == 404:
+            raise RuntimeError(f"Combate {combate_id} no encontrado en el servidor.")
+        r.raise_for_status()
+        return r.text or "OK"
 
 api = ApiClient()
