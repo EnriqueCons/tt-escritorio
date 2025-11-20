@@ -14,6 +14,8 @@ from kivy.uix.textinput import TextInput
 from kivy.utils import platform
 from kivy.clock import Clock
 from kivy.animation import Animation
+from api_client import api
+from threading import Thread
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -607,8 +609,11 @@ class CombateCard(BoxLayout):
         
         app.root.current = 'tablero'
 
-
 class CombatesScreen(Screen):
+    """
+    Pantalla que muestra todos los combates de un torneo.
+    Conectada a la API REST para operaciones CRUD.
+    """
     torneo_nombre = StringProperty('')
     torneo_id = NumericProperty(None)
     
@@ -617,6 +622,7 @@ class CombatesScreen(Screen):
         self.combates = []
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
+        print(f"[CombatesScreen] Inicializado para torneo: {self.torneo_nombre} (ID: {self.torneo_id})")
 
     def build_ui(self):
         self.clear_widgets()
@@ -628,7 +634,7 @@ class CombatesScreen(Screen):
             self.rect = RoundedRectangle(pos=self.layout.pos, size=self.layout.size)
             self.layout.bind(pos=self.update_rect, size=self.update_rect)
 
-        # Header mejorado
+        # Header
         header = BoxLayout(size_hint_y=None, height=dp(90), padding=[dp(20), dp(15)])
         header_content = BoxLayout(orientation='vertical', spacing=dp(5))
         
@@ -656,7 +662,7 @@ class CombatesScreen(Screen):
         header.add_widget(header_content)
         self.layout.add_widget(header)
         
-        # ScrollView mejorado
+        # ScrollView
         scroll = ScrollView(
             size_hint=(1, 1),
             scroll_type=['bars', 'content'],
@@ -675,12 +681,10 @@ class CombatesScreen(Screen):
         )
         self.grid.bind(minimum_height=self.grid.setter('height'))
         
-        self.load_combates()
-        
         scroll.add_widget(self.grid)
         self.layout.add_widget(scroll)
 
-        # Footer mejorado
+        # Footer
         footer = BoxLayout(size_hint_y=None, height=dp(70), padding=[dp(30), dp(15), dp(30), dp(15)])
         btn_volver = Button(
             text="Volver",
@@ -704,6 +708,9 @@ class CombatesScreen(Screen):
         self.layout.add_widget(footer)
         
         self.add_widget(self.layout)
+        
+        # IMPORTANTE: Cargar combates desde la API
+        self.load_combates()
 
     def update_rect(self, *args):
         self.rect.pos = self.layout.pos
@@ -713,48 +720,171 @@ class CombatesScreen(Screen):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
     def load_combates(self):
+        """Carga los combates desde la API"""
+        print("[CombatesScreen] Iniciando carga de combates...")
         self.grid.clear_widgets()
         
-        combates_data = [
-            {
-                "id": 1, "numero": 1, "fecha": "2024-01-15", "hora": "10:30",
-                "categoria": "Peso Medio Masculino Senior",
-                "competidor1": "Juan Pérez", "fecha_nac1": "15/05/1990",
-                "peso1": 70.5, "altura1": 175, "sexo1": "Masculino",
-                "nacionalidad1": "Mexicana", "peto_rojo": "ROJO123",
-                "competidor2": "Carlos Gómez", "fecha_nac2": "22/08/1992",
-                "peso2": 72.0, "altura2": 178, "sexo2": "Masculino",
-                "nacionalidad2": "Mexicana", "peto_azul": "AZUL456",
-                "area": "Área A", "Sede": "Tatami 1",
-                "categoria_peso": "-70kg", "num_rounds": 3,
-                "duracion_round": 3, "duracion_descanso": 1,
-                "arbitro_nombre": "Luis Martínez", "arbitro_Apellidos": "García",
-                "juez1_nombre": "Ana", "juez1_Apellidos": "Rodríguez",
-                "juez2_nombre": "Pedro", "juez2_Apellidos": "Sánchez",
-                "juez3_nombre": "María", "juez3_Apellidos": "López",
-                "torneo_id": self.torneo_id
-            },
-            {
-                "id": 2, "numero": 2, "fecha": "2024-01-15", "hora": "11:45",
-                "categoria": "Peso Pesado Femenino Junior",
-                "competidor1": "María López", "fecha_nac1": "10/03/1995",
-                "peso1": 68.0, "altura1": 170, "sexo1": "Femenino",
-                "nacionalidad1": "Mexicana", "peto_rojo": "ROJO456",
-                "competidor2": "Ana Martínez", "fecha_nac2": "05/07/1994",
-                "peso2": 67.5, "altura2": 169, "sexo2": "Femenino",
-                "nacionalidad2": "Mexicana", "peto_azul": "AZUL789",
-                "area": "Área B", "Sede": "Tatami 2",
-                "categoria_peso": "-68kg", "num_rounds": 5,
-                "duracion_round": 3, "duracion_descanso": 1,
-                "arbitro_nombre": "Jorge Hernández", "arbitro_Apellidos": "López",
-                "juez1_nombre": "Carlos", "juez1_Apellidos": "Gómez",
-                "juez2_nombre": "Luisa", "juez2_Apellidos": "Fernández",
-                "juez3_nombre": "Roberto", "juez3_Apellidos": "Díaz",
-                "torneo_id": self.torneo_id
-            }
-        ]
+        # Mostrar indicador de carga
+        loading_label = Label(
+            text='Cargando combates...',
+            font_size=ResponsiveHelper.get_font_size(18),
+            color=(0.2, 0.6, 1, 1)
+        )
+        self.grid.add_widget(loading_label)
         
-        for combate in combates_data:
+        # Hacer la petición en un thread separado
+        thread = Thread(target=self._fetch_combates)
+        thread.daemon = True
+        thread.start()
+
+    def _fetch_combates(self):
+        """Obtiene los combates de la API en segundo plano"""
+        print("[CombatesScreen] Fetching combates from API...")
+        try:
+            # Usar el cliente API
+            combates_data = api.get_all_combates()
+            print(f"[CombatesScreen] Recibidos {len(combates_data)} combates de la API")
+            
+            # Filtrar por torneo_id si es necesario
+            if self.torneo_id:
+                combates_data = [
+                    c for c in combates_data 
+                    if c.get('torneo_id') == self.torneo_id
+                ]
+                print(f"[CombatesScreen] Después del filtro por torneo_id={self.torneo_id}: {len(combates_data)} combates")
+            
+            # Transformar los datos al formato que espera tu UI
+            self.combates = [self._transform_combate(c) for c in combates_data]
+            print(f"[CombatesScreen] Combates transformados: {len(self.combates)}")
+            
+            # Actualizar la UI en el hilo principal
+            Clock.schedule_once(lambda dt: self._display_combates())
+                
+        except RuntimeError as e:
+            print(f"[CombatesScreen] RuntimeError: {e}")
+            Clock.schedule_once(
+                lambda dt: self._show_error(str(e))
+            )
+        except Exception as e:
+            print(f"[CombatesScreen] Exception: {type(e).__name__}: {e}")
+            error_msg = "No se pudo conectar al servidor" if "Connection" in str(e) else f"Error: {str(e)}"
+            Clock.schedule_once(
+                lambda dt: self._show_error(error_msg)
+            )
+
+    def _transform_combate(self, api_data):
+        """Transforma los datos de la API al formato que espera la UI"""
+        return {
+            "id": api_data.get("idCombate"),
+            "numero": api_data.get("idCombate"),
+            "fecha": self._format_date(api_data.get("horaCombate")),
+            "hora": self._format_time(api_data.get("horaCombate")),
+            "categoria": api_data.get("area", "Sin categoría"),
+            
+            # Competidor Rojo
+            "competidor1": api_data.get("competidorRojo", {}).get("nombres", "No disponible"),
+            "fecha_nac1": self._format_date_simple(api_data.get("competidorRojo", {}).get("fechaNacimiento", "")),
+            "peso1": api_data.get("competidorRojo", {}).get("pesoKg", 0),
+            "sexo1": api_data.get("competidorRojo", {}).get("sexo", ""),
+            "nacionalidad1": "Mexicana",
+            
+            # Competidor Azul
+            "competidor2": api_data.get("competidorAzul", {}).get("nombres", "No disponible"),
+            "fecha_nac2": self._format_date_simple(api_data.get("competidorAzul", {}).get("fechaNacimiento", "")),
+            "peso2": api_data.get("competidorAzul", {}).get("pesoKg", 0),
+            "sexo2": api_data.get("competidorAzul", {}).get("sexo", ""),
+            "nacionalidad2": "Mexicana",
+            
+            # Detalles del combate
+            "area": api_data.get("area", "Sin área"),
+            "num_rounds": api_data.get("numeroRound", 0),
+            "duracion_round": self._parse_duration(api_data.get("duracionRound")),
+            "duracion_descanso": self._parse_duration(api_data.get("duracionDescanso")),
+            "estado": api_data.get("estado", "PENDIENTE"),
+            
+            # Jueces
+            "arbitro_nombre": api_data.get("jueces", {}).get("arbitroCentral", {}).get("nombres", ""),
+            "arbitro_Apellidos": api_data.get("jueces", {}).get("arbitroCentral", {}).get("apellidos", ""),
+            "juez1_nombre": api_data.get("jueces", {}).get("juez1", {}).get("nombres", ""),
+            "juez1_Apellidos": api_data.get("jueces", {}).get("juez1", {}).get("apellidos", ""),
+            "juez2_nombre": api_data.get("jueces", {}).get("juez2", {}).get("nombres", ""),
+            "juez2_Apellidos": api_data.get("jueces", {}).get("juez2", {}).get("apellidos", ""),
+            "juez3_nombre": api_data.get("jueces", {}).get("juez3", {}).get("nombres", ""),
+            "juez3_Apellidos": api_data.get("jueces", {}).get("juez3", {}).get("apellidos", ""),
+            
+            "torneo_id": self.torneo_id
+        }
+
+    def _format_date(self, datetime_str):
+        """Formatea la fecha desde ISO 8601 a formato dd/mm/yyyy"""
+        if not datetime_str:
+            return "Sin fecha"
+        try:
+            from datetime import datetime
+            # Manejar diferentes formatos
+            if 'T' in str(datetime_str):
+                dt = datetime.fromisoformat(str(datetime_str).replace('Z', '+00:00'))
+            else:
+                dt = datetime.strptime(str(datetime_str), "%Y-%m-%d")
+            return dt.strftime("%d/%m/%Y")
+        except:
+            return "Sin fecha"
+
+    def _format_date_simple(self, date_str):
+        """Formatea una fecha simple YYYY-MM-DD a DD/MM/YYYY"""
+        if not date_str:
+            return ""
+        try:
+            from datetime import datetime
+            if isinstance(date_str, str):
+                if 'T' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                return dt.strftime("%d/%m/%Y")
+            return str(date_str)
+        except:
+            return str(date_str)
+
+    def _format_time(self, datetime_str):
+        """Extrae la hora desde ISO 8601"""
+        if not datetime_str:
+            return "Sin hora"
+        try:
+            from datetime import datetime
+            if 'T' in str(datetime_str):
+                dt = datetime.fromisoformat(str(datetime_str).replace('Z', '+00:00'))
+                return dt.strftime("%H:%M")
+            return "Sin hora"
+        except:
+            return "Sin hora"
+
+    def _parse_duration(self, time_str):
+        """Convierte LocalTime (HH:mm:ss) a minutos"""
+        if not time_str:
+            return 0
+        try:
+            parts = str(time_str).split(':')
+            if len(parts) >= 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            return 0
+        except:
+            return 0
+
+    def _display_combates(self):
+        """Muestra los combates en la UI (se ejecuta en el hilo principal)"""
+        self.grid.clear_widgets()
+        
+        if not self.combates:
+            no_data_label = Label(
+                text='No hay combates registrados',
+                font_size=ResponsiveHelper.get_font_size(18),
+                color=(0.5, 0.5, 0.5, 1)
+            )
+            self.grid.add_widget(no_data_label)
+            return
+        
+        for combate in self.combates:
             card = CombateCard(
                 combate_data=combate,
                 on_delete=self.delete_combate,
@@ -762,20 +892,126 @@ class CombatesScreen(Screen):
             )
             self.grid.add_widget(card)
 
+    def _show_error(self, message):
+        """Muestra un mensaje de error en la UI"""
+        self.grid.clear_widgets()
+        
+        error_box = BoxLayout(
+            orientation='vertical',
+            spacing=dp(15),
+            padding=dp(20),
+            size_hint_y=None,
+            height=dp(150)
+        )
+        
+        error_label = Label(
+            text=message,
+            font_size=ResponsiveHelper.get_font_size(16),
+            color=(1, 0, 0, 1),
+            halign='center',
+            valign='middle'
+        )
+        error_label.bind(size=error_label.setter('text_size'))
+        error_box.add_widget(error_label)
+        
+        # Botón para reintentar
+        retry_btn = Button(
+            text='Reintentar',
+            size_hint=(None, None),
+            size=(dp(200), dp(50)),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=(0.2, 0.6, 1, 1),
+            color=(1, 1, 1, 1),
+            bold=True,
+            font_size=ResponsiveHelper.get_font_size(16)
+        )
+        retry_btn.bind(on_press=lambda x: self.load_combates())
+        error_box.add_widget(retry_btn)
+        
+        self.grid.add_widget(error_box)
+
     def delete_combate(self, combate_data):
-        print(f"Eliminando combate #{combate_data['numero']} - ID: {combate_data['id']}")
+        """Elimina un combate mediante la API usando ApiClient"""
+        combate_id = combate_data['id']
+        
+        def _do_delete():
+            try:
+                success = api.delete_combate(combate_id)
+                if success:
+                    Clock.schedule_once(lambda dt: self._on_delete_success(combate_data))
+                else:
+                    Clock.schedule_once(
+                        lambda dt: self.show_message("Error", "No se pudo eliminar el combate")
+                    )
+            except RuntimeError as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", str(e))
+                )
+            except Exception as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", f"Error al eliminar: {str(e)}")
+                )
+        
+        thread = Thread(target=_do_delete)
+        thread.daemon = True
+        thread.start()
+
+    def _on_delete_success(self, combate_data):
+        """Callback cuando se elimina exitosamente"""
         self.show_message("Éxito", f"Combate #{combate_data['numero']} eliminado correctamente")
         self.load_combates()
 
     def edit_combate(self, combate_original, nuevos_datos):
-        print(f"Actualizando combate #{combate_original['numero']} con:", nuevos_datos)
-        for key, value in nuevos_datos.items():
-            combate_original[key] = value
+        """Actualiza un combate mediante la API usando ApiClient"""
+        combate_id = combate_original['id']
         
+        def _do_update():
+            try:
+                # Transformar los datos al formato que espera tu API
+                payload = {
+                    "area": nuevos_datos.get("area", combate_original["area"]),
+                    "numeroRound": nuevos_datos.get("num_rounds", combate_original["num_rounds"]),
+                    "duracionRound": self._minutes_to_time(nuevos_datos.get("duracion_round", combate_original["duracion_round"])),
+                    "duracionDescanso": self._minutes_to_time(nuevos_datos.get("duracion_descanso", combate_original["duracion_descanso"])),
+                    "estado": nuevos_datos.get("estado", combate_original["estado"]),
+                }
+                
+                result = api.update_combate(combate_id, payload)
+                if result:
+                    Clock.schedule_once(lambda dt: self._on_update_success(combate_original))
+                else:
+                    Clock.schedule_once(
+                        lambda dt: self.show_message("Error", "No se pudo actualizar el combate")
+                    )
+            except RuntimeError as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", str(e))
+                )
+            except Exception as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", f"Error al actualizar: {str(e)}")
+                )
+        
+        thread = Thread(target=_do_update)
+        thread.daemon = True
+        thread.start()
+
+    def _minutes_to_time(self, minutes):
+        """Convierte minutos a formato HH:mm:ss"""
+        if not minutes:
+            return "00:00:00"
+        hours = int(minutes) // 60
+        mins = int(minutes) % 60
+        return f"{hours:02d}:{mins:02d}:00"
+
+    def _on_update_success(self, combate_original):
+        """Callback cuando se actualiza exitosamente"""
         self.show_message("Éxito", f"Combate #{combate_original['numero']} actualizado correctamente")
         self.load_combates()
 
     def show_message(self, title, message):
+        """Muestra un popup con un mensaje"""
         content = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(25))
         
         popup_size = ResponsiveHelper.get_popup_size()
