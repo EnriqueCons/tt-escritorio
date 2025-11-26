@@ -16,6 +16,7 @@ from kivy.clock import Clock
 from threading import Thread
 from datetime import datetime
 from api_client import api
+from actualizar_torneos import ActualizarTorneoScreen
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
 class ResponsiveHelper:
@@ -373,15 +374,27 @@ class TorneoCard(BoxLayout):
         ).open()
 
     def open_edit_screen(self, instance):
+        """
+        CORREGIDO: Ahora pasa correctamente todos los datos del torneo,
+        incluyendo el idTorneo que es crítico para el backend.
+        """
         app = App.get_running_app()
-        if not app.root.has_screen('actualizar_torneos'):
-            from actualizar_torneos import ActualizarTorneoScreen
-            app.root.add_widget(ActualizarTorneoScreen(
-                name='actualizar_torneos',
-                torneo_data=self.torneo_data,
-                on_save=self.on_edit_callback
-            ))
         
+        # Debug: imprimir los datos del torneo que se están pasando
+        print(f"[DEBUG TorneoCard] Abriendo edición para torneo: {self.torneo_data}")
+        print(f"[DEBUG TorneoCard] idTorneo: {self.torneo_data.get('idTorneo')}")
+        
+        # Remover la pantalla anterior si existe para forzar recarga
+        if app.root.has_screen('actualizar_torneos'):
+            app.root.remove_widget(app.root.get_screen('actualizar_torneos'))
+        
+        edit_screen = ActualizarTorneoScreen(
+            name='actualizar_torneos',
+            torneo_data=self.torneo_data, 
+            on_save=self.on_edit_callback
+        )
+        
+        app.root.add_widget(edit_screen)
         app.root.current = 'actualizar_torneos'
 
     def navigate_to_combates(self, instance):
@@ -392,7 +405,7 @@ class TorneoCard(BoxLayout):
         
         combates_screen = app.root.get_screen('combates_anteriores')
         combates_screen.torneo_nombre = self.torneo_data['nombre']
-        combates_screen.torneo_id = self.torneo_data.get('idTorneo')  # ← CAMBIO AQUÍ
+        combates_screen.torneo_id = self.torneo_data.get('idTorneo')
         
         # Solo rebuildeamos si el screen ya estaba creado
         if combates_screen in app.root.screens:
@@ -404,6 +417,10 @@ class TorneoCard(BoxLayout):
 class TorneosAnterioresScreen(Screen):
 
     def _map_torneo(self, t: dict) -> dict:
+        """
+        Mapea la respuesta del backend al formato que espera la UI.
+        IMPORTANTE: Preserva el idTorneo para que esté disponible.
+        """
         nombre = t.get("nombre") or f"Torneo #{t.get('idTorneo', 's/n')}"
         fecha = "—"
         hora_inicio = "—"
@@ -412,33 +429,41 @@ class TorneosAnterioresScreen(Screen):
         fh = t.get("fechaHora")
         if fh:
             try:
-             
                 fh_clean = fh.replace('Z', '+00:00') if fh.endswith('Z') else fh
                 dt = datetime.fromisoformat(fh_clean)
-                fecha = dt.strftime('%Y-%m-%d')
+                fecha = dt.strftime('%d/%m/%Y')  # Cambiado a DD/MM/YYYY para consistencia
                 hora_inicio = dt.strftime('%H:%M')
-            except Exception:
-           
+                # Nota: hora_fin no viene del backend, se calcula o se deja como "—"
+            except Exception as e:
+                print(f"[ERROR] Error parseando fechaHora '{fh}': {e}")
                 pass
 
-        return {
+        mapped_data = {
             "nombre": nombre,
             "fecha": fecha,
             "hora_inicio": hora_inicio,
             "hora_fin": hora_fin,
             "Sede": t.get("sede") or "—",
-            "idTorneo": t.get("idTorneo")
+            "idTorneo": t.get("idTorneo"),  # ⭐ CRÍTICO: Preservar el ID
+            "estado": t.get("estado"),
+            "administrador": t.get("administrador")
         }
+        
+        print(f"[DEBUG] Torneo mapeado: {mapped_data}")
+        return mapped_data
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.torneos_data = []
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
 
     def on_enter(self, *args):
+        """Se ejecuta cada vez que se entra a esta pantalla"""
         self.fetch_torneos()
 
     def fetch_torneos(self):
+        """Obtiene los torneos desde el backend"""
         self.torneos_data = []
         self.grid.clear_widgets()
         loading = Label(
@@ -452,15 +477,22 @@ class TorneosAnterioresScreen(Screen):
 
         def _task():
             try:
-                resp = api.get_json("/apiTorneos/torneo")  # debe enviar Accept: application/json
+                print("[DEBUG] Solicitando torneos al backend...")
+                resp = api.get_json("/apiTorneos/torneo")
                 status = resp.status_code
+                print(f"[DEBUG] Status code: {status}")
+                
                 if status == 200:
                     try:
                         data = resp.json() or []
-                    except Exception:
+                        print(f"[DEBUG] Torneos recibidos: {len(data)}")
+                    except Exception as e:
+                        print(f"[ERROR] Error parseando JSON: {e}")
                         data = []
-                    # mapear
+                    
+                    # Mapear datos
                     mapped = [self._map_torneo(t) for t in data]
+                    
                     def _ok(dt):
                         self.torneos_data = mapped
                         self.populate_torneos()
@@ -470,33 +502,46 @@ class TorneosAnterioresScreen(Screen):
                         self._show_error(f"Error {status} al consultar torneos.")
                     Clock.schedule_once(_err, 0)
             except Exception as e:
+                print(f"[ERROR] Exception en fetch_torneos: {e}")
                 def _err(dt, m=str(e)):
                     self._show_error(f"No se pudo obtener torneos.\n{m}")
                 Clock.schedule_once(_err, 0)
 
         Thread(target=_task, daemon=True).start()
 
-
     def _show_error(self, msg: str):
+        """Muestra un popup con mensaje de error"""
         popup = Popup(
             title="Error",
             size_hint=(None, None),
             size=ResponsiveHelper.get_popup_size()
         )
         box = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(10))
-        box.add_widget(Label(text=msg, halign='center', valign='middle'))
-        btn = Button(text="Cerrar", size_hint_y=None, height=dp(45))
+        box.add_widget(Label(
+            text=msg,
+            halign='center',
+            valign='middle',
+            font_size=ResponsiveHelper.get_font_size(16)
+        ))
+        btn = Button(
+            text="Cerrar",
+            size_hint_y=None,
+            height=dp(45),
+            background_normal='',
+            background_color=(0.2, 0.6, 1, 1),
+            color=(1, 1, 1, 1)
+        )
         btn.bind(on_press=popup.dismiss)
         box.add_widget(btn)
         popup.content = box
         popup.open()
 
-
     def populate_torneos(self):
+        """Llena el grid con las tarjetas de torneos"""
         self.grid.clear_widgets()
-        if not getattr(self, 'torneos_data', []):
+        if not self.torneos_data:
             self.grid.add_widget(Label(
-                text="No hay torneos.",
+                text="No hay torneos registrados",
                 font_size=ResponsiveHelper.get_font_size(18),
                 color=(0.2, 0.4, 0.7, 1),
                 size_hint_y=None,
@@ -512,7 +557,6 @@ class TorneosAnterioresScreen(Screen):
             )
             self.grid.add_widget(card)
 
-    
     def build_ui(self):
         self.clear_widgets()
         
@@ -568,39 +612,6 @@ class TorneosAnterioresScreen(Screen):
         )
         self.grid.bind(minimum_height=self.grid.setter('height'))
 
-        # Datos de ejemplo
-        self.torneos_data = [
-            {
-                "nombre": "Torneo Internacional 2024",
-                "fecha": "2024-01-15",
-                "hora_inicio": "09:00",
-                "hora_fin": "18:00",
-                "Sede": "Sala de armas"
-            },
-            {
-                "nombre": "Copa América 2024",
-                "fecha": "2024-02-20",
-                "hora_inicio": "08:30",
-                "hora_fin": "17:30",
-                "Sede": "Sala de armas"
-            },
-            {
-                "nombre": "Euro Championship",
-                "fecha": "2024-03-10",
-                "hora_inicio": "10:00",
-                "hora_fin": "19:00",
-                "Sede": "Sala de armas"
-            },
-            {
-                "nombre": "Asia Open 2024",
-                "fecha": "2024-04-05",
-                "hora_inicio": "08:00",
-                "hora_fin": "16:00",
-                "Sede": "Sala de armas"
-            },
-        ]
-        self.populate_torneos()
-
         self.scroll.add_widget(self.grid)
         self.layout.add_widget(self.scroll)
 
@@ -637,20 +648,10 @@ class TorneosAnterioresScreen(Screen):
         else:
             return 1
 
-    def populate_torneos(self):
-        self.grid.clear_widgets()
-        for torneo in self.torneos_data:
-            card = TorneoCard(
-                torneo_data=torneo,
-                on_delete=self.delete_torneo,
-                on_edit=self.edit_torneo
-            )
-            self.grid.add_widget(card)
-
     def delete_torneo(self, torneo_a_eliminar: dict):
         """
         Handler que se ejecuta tras confirmar en el popup.
-        Si hay idTorneo, llamamos al backend. Si no, borramos localmente.
+        Elimina el torneo del backend.
         """
         torneo_id = torneo_a_eliminar.get("idTorneo")
 
@@ -675,48 +676,40 @@ class TorneosAnterioresScreen(Screen):
 
         def _task():
             try:
+                print(f"[DEBUG] Eliminando torneo ID: {torneo_id}")
                 resp = api.delete(f"/apiTorneos/torneo/{torneo_id}")
+                print(f"[DEBUG] Status code delete: {resp.status_code}")
+                
                 if resp.status_code in (200, 204):
-                    # Éxito: refrescar lista desde el backend si ya usas fetch_torneos
+                    # Éxito: refrescar lista desde el backend
                     def _ok(dt):
-                        # Si ya tienes fetch_torneos, úsalo:
-                        if hasattr(self, "fetch_torneos"):
-                            self.fetch_torneos()
-                        else:
-                            # Fallback por si estás con datos locales
-                            self.torneos_data = [
-                                t for t in self.torneos_data
-                                if t.get('idTorneo') != torneo_id
-                            ]
-                            self.populate_torneos()
+                        self.fetch_torneos()
                     Clock.schedule_once(_ok, 0)
                 else:
                     def _err(dt):
                         self._show_error(f"No se pudo eliminar (HTTP {resp.status_code}).")
-                        # Recuperar la lista por si se vació visualmente
-                        if hasattr(self, "fetch_torneos"):
-                            self.fetch_torneos()
-                        else:
-                            self.populate_torneos()
+                        self.fetch_torneos()
                     Clock.schedule_once(_err, 0)
             except Exception as e:
+                print(f"[ERROR] Exception eliminando torneo: {e}")
                 def _err(dt, m=str(e)):
                     self._show_error(f"Error eliminando torneo:\n{m}")
-                    if hasattr(self, "fetch_torneos"):
-                        self.fetch_torneos()
-                    else:
-                        self.populate_torneos()
+                    self.fetch_torneos()
                 Clock.schedule_once(_err, 0)
 
         Thread(target=_task, daemon=True).start()
 
-
     def edit_torneo(self, torneo_original, nuevos_datos):
-        for i, torneo in enumerate(self.torneos_data):
-            if torneo['nombre'] == torneo_original['nombre']:
-                self.torneos_data[i] = nuevos_datos
-                break
-        self.populate_torneos()
+        """
+        Callback que se ejecuta después de editar un torneo.
+        Simplemente refresca la lista desde el backend.
+        """
+        print(f"[DEBUG] edit_torneo callback ejecutado")
+        print(f"[DEBUG] Torneo original: {torneo_original}")
+        print(f"[DEBUG] Nuevos datos: {nuevos_datos}")
+        
+        # Refrescar la lista completa desde el backend
+        self.fetch_torneos()
 
     def update_rect(self, *args):
         self.rect.pos = self.layout.pos

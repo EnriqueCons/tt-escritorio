@@ -168,6 +168,81 @@ class ApiClient:
         r.raise_for_status()
         return r.json() if r.content else []
     
+    # ============ ENDPOINTS DE TORNEOS ============
+    
+    def get_all_torneos(self, timeout=None) -> list:
+        """
+        GET /apiTorneos/torneo
+        Devuelve la lista de todos los torneos.
+        """
+        r = self.get_json("/apiTorneos/torneo", timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else []
+
+    def get_torneo_by_id(self, torneo_id: int, timeout=None) -> dict:
+        """
+        GET /apiTorneos/torneo/{id}
+        Devuelve un torneo específico por su ID.
+        """
+        print(f"[DEBUG API] Obteniendo torneo {torneo_id}")
+        
+        r = self.get_json(f"/apiTorneos/torneo/{torneo_id}", timeout=timeout)
+        
+        print(f"[DEBUG API] Status code: {r.status_code}")
+        
+        if r.status_code == 404:
+            raise RuntimeError(f"Torneo {torneo_id} no encontrado.")
+        
+        r.raise_for_status()
+        
+        result = r.json() if r.content else {}
+        print(f"[DEBUG API] Torneo obtenido: {result}")
+        
+        return result
+
+    def create_torneo(self, payload: dict, timeout=None) -> dict:
+        """
+        POST /apiTorneos/torneo
+        Crea un nuevo torneo.
+        Devuelve el JSON del torneo creado (incluyendo su id).
+        """
+        r = self.post_json("/apiTorneos/torneo", payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def update_torneo(self, torneo_id: int, payload: dict, timeout=None) -> dict:
+        """
+        PUT /apiTorneos/torneo/{id}
+        Actualiza un torneo existente.
+        """
+        print(f"[DEBUG API] Actualizando torneo {torneo_id} con payload: {payload}")
+        
+        r = self.put_json(f"/apiTorneos/torneo/{torneo_id}", payload, timeout=timeout)
+        
+        print(f"[DEBUG API] Status code: {r.status_code}")
+        print(f"[DEBUG API] Response text: {r.text}")
+        
+        if r.status_code == 404:
+            raise RuntimeError(f"Torneo {torneo_id} no encontrado.")
+        
+        r.raise_for_status()
+        
+        result = r.json() if r.content else {}
+        print(f"[DEBUG API] Response JSON: {result}")
+        
+        return result
+
+    def delete_torneo(self, torneo_id: int, timeout=None) -> bool:
+        """
+        DELETE /apiTorneos/torneo/{id}
+        Elimina un torneo por su ID.
+        Devuelve True si se eliminó correctamente.
+        """
+        r = self.delete(f"/apiTorneos/torneo/{torneo_id}", timeout=timeout)
+        if r.status_code == 404:
+            raise RuntimeError(f"Torneo {torneo_id} no encontrado.")
+        r.raise_for_status()
+        return r.status_code in (200, 204)
 
     def get_ultimo_torneo(self, timeout=None) -> dict:
         """

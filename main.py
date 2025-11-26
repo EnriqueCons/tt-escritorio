@@ -185,7 +185,7 @@ class ResponsiveHelper:
         elif width < 1600:
             return 0.65
         else:
-            return 0.55  # ⭐ Más estrecho en pantallas grandes (mejor legibilidad)
+            return 0.55  
 # ------------------ BOTÓN CON EFECTO HOVER RESPONSIVE ------------------
 class HoverButton(Button):
     def __init__(self, **kwargs):
