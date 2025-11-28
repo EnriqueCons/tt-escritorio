@@ -3,7 +3,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.graphics import Color, Rectangle, RoundedRectangle
-from kivy.properties import NumericProperty, StringProperty
+from kivy.properties import NumericProperty, StringProperty, BooleanProperty
 from kivy.clock import Clock
 from kivy.utils import get_color_from_hex, platform
 from kivy.uix.screenmanager import Screen, ScreenManager
@@ -76,16 +76,17 @@ class ResponsiveHelper:
 class CompetitorPanel(BoxLayout):
     score = NumericProperty(0)
     penalty_score = NumericProperty(0)
-    manual_score = NumericProperty(0)
+    api_score = NumericProperty(0)
 
-    def __init__(self, name, color, nationality="", alumno_id=None, **kwargs):
+    def __init__(self, name, color, nationality="", alumno_id=None, combate_id=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         self.name = name
         self.bg_color = get_color_from_hex(color)
         self.nationality = nationality
         self.alumno_id = alumno_id
-        self.api_score = 0  # Puntaje desde el backend
+        self.combate_id = combate_id
+        self.parent_screen = None  # Referencia a MainScreentabc
         
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
@@ -137,7 +138,7 @@ class CompetitorPanel(BoxLayout):
         
         btn_minus_score = Button(
             text="-",
-            on_press=lambda x: self.update_manual_score(-1),
+            on_press=lambda x: self.subtract_score_api(),
             font_size=ResponsiveHelper.get_font_size(25),
             background_color=(0.2, 0.2, 0.2, 1),
             color=(1, 1, 1, 1),
@@ -155,7 +156,7 @@ class CompetitorPanel(BoxLayout):
         
         btn_plus_score = Button(
             text="+",
-            on_press=lambda x: self.update_manual_score(1),
+            on_press=lambda x: self.add_score_api(),
             font_size=ResponsiveHelper.get_font_size(25),
             background_color=(0.2, 0.2, 0.2, 1),
             color=(1, 1, 1, 1),
@@ -165,15 +166,15 @@ class CompetitorPanel(BoxLayout):
         
         self.add_widget(score_layout)
 
-        # Indicador de puntos manuales pendientes
-        self.manual_indicator = Label(
+        # Indicador de estado (conexión, errores, etc.)
+        self.status_indicator = Label(
             text="",
-            font_size=ResponsiveHelper.get_font_size(14),
+            font_size=ResponsiveHelper.get_font_size(12),
             color=(1, 1, 0.5, 1),
             size_hint_y=None,
             height=dp(20)
         )
-        self.add_widget(self.manual_indicator)
+        self.add_widget(self.status_indicator)
 
         # Espaciador
         self.add_widget(BoxLayout(size_hint_y=0.05))
@@ -242,66 +243,132 @@ class CompetitorPanel(BoxLayout):
             self.penalty_score = 0
         self.penalty_label.text = str(self.penalty_score)
 
-    def update_manual_score(self, value):
-        """Actualiza el puntaje manual (temporal, no guardado)"""
-        self.manual_score += value
-        if self.manual_score < 0:
-            self.manual_score = 0
+    def add_score_api(self):
+        """ Suma 1 punto directamente en la BD (tiempo real) """
+        if not self.alumno_id or not self.combate_id:
+            print("[CompetitorPanel] ⚠️ No hay alumno_id o combate_id")
+            return
+    
+        # Verificar si el timer está activo
+        if self.parent_screen and not self.parent_screen.is_timer_active():
+            self.show_status("⚠️ Inicia el timer primero")
+            print("[CompetitorPanel] ⚠️ Timer no activo, no se puede sumar")
+            return
+    
+        self.show_status("Guardando...")
+    
+        def work():
+            try:
+                #  CAMBIO: Usar el endpoint simplificado con parámetros
+                url = f"http://localhost:8080/apiPuntajes/puntaje/simple?combateId={self.combate_id}&alumnoId={self.alumno_id}&valorPuntaje=1"
+                response = requests.post(url, timeout=5)
+                
+                if response.status_code in [200, 201]:
+                    data = response.json()
+                    print(f"[CompetitorPanel] ✓ +1 punto guardado para alumno {self.alumno_id}")
+                    # Actualizar el score con el nuevo count
+                    new_count = data.get('newCount', 0)
+                    self.update_api_score(new_count)
+                    self.show_status("✓ +1")
+                    Clock.schedule_once(lambda dt: self.clear_status(), 1)
+                else:
+                    print(f"[CompetitorPanel] ✗ Error al guardar: {response.status_code}")
+                    self.show_status(f"✗ Error {response.status_code}")
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Excepción: {e}")
+                self.show_status("✗ Error conexión")
         
-        # Actualizar display total
-        total = self.api_score + self.manual_score
-        self.score_label.text = str(total)
+        Thread(target=work, daemon=True).start()
+
+    def subtract_score_api(self):
+        """⭐ Resta 1 punto (elimina el último registro de la BD)"""
+        if not self.alumno_id:
+            print("[CompetitorPanel] ⚠️ No hay alumno_id")
+            return
         
-        # Mostrar indicador
-        if self.manual_score > 0:
-            self.manual_indicator.text = f"(+{self.manual_score} pendiente)"
-        else:
-            self.manual_indicator.text = ""
+        # Verificar si el timer está activo
+        if self.parent_screen and not self.parent_screen.is_timer_active():
+            self.show_status("⚠️ Inicia el timer primero")
+            print("[CompetitorPanel] ⚠️ Timer no activo, no se puede restar")
+            return
+        
+        # No permitir restar si ya está en 0
+        if self.api_score <= 0:
+            self.show_status("⚠️ Ya está en 0")
+            return
+        
+        self.show_status("Eliminando...")
+        
+        def work():
+            try:
+                url = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{self.alumno_id}/last"
+                response = requests.delete(url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    new_count = data.get('newCount', 0)
+                    print(f"[CompetitorPanel] ✓ -1 punto eliminado para alumno {self.alumno_id}, nuevo total: {new_count}")
+                    self.update_api_score(new_count)
+                    self.show_status("✓ -1")
+                    Clock.schedule_once(lambda dt: self.clear_status(), 1)
+                elif response.status_code == 204:
+                    print(f"[CompetitorPanel] ✓ Punto eliminado")
+                    self.refresh_score()
+                    self.show_status("✓ -1")
+                    Clock.schedule_once(lambda dt: self.clear_status(), 1)
+                else:
+                    print(f"[CompetitorPanel] ✗ Error al eliminar: {response.status_code}")
+                    self.show_status(f"✗ Error {response.status_code}")
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Excepción: {e}")
+                self.show_status("✗ Error conexión")
+        
+        Thread(target=work, daemon=True).start()
+
+    def refresh_score(self):
+        """Refresca el puntaje desde la API"""
+        if not self.alumno_id:
+            return
+        
+        def work():
+            try:
+                url = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{self.alumno_id}/count"
+                response = requests.get(url, timeout=2)
+                if response.status_code == 200:
+                    new_count = response.json().get('count', 0)
+                    self.update_api_score(new_count)
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Error refrescando: {e}")
+        
+        Thread(target=work, daemon=True).start()
 
     @mainthread
     def update_api_score(self, new_score):
         """⭐ Actualiza el puntaje desde el WebSocket en tiempo real"""
         self.api_score = new_score
-        total = self.api_score + self.manual_score
-        self.score_label.text = str(total)
-        print(f"[CompetitorPanel] 📊 Score actualizado: {self.name} = {total} (API: {self.api_score}, Manual: {self.manual_score})")
+        self.score_label.text = str(self.api_score)
+        print(f"[CompetitorPanel] 📊 Score actualizado: {self.name} = {self.api_score}")
 
-    def save_manual_scores(self, combate_id):
-        """Guarda los puntos manuales al backend"""
-        if self.manual_score <= 0:
-            return True
-        
-        try:
-            url = "http://localhost:8080/apiPuntajeDetalle/"
-            payload = {
-                "combate": {"idCombate": combate_id},
-                "alumno": {"idAlumno": self.alumno_id},
-                "valorPuntaje": self.manual_score
-            }
-            response = requests.post(url, json=payload, timeout=5)
-            
-            if response.status_code in [200, 201]:
-                print(f"[CompetitorPanel] ✓ Puntos manuales guardados: {self.manual_score}")
-                self.manual_score = 0
-                self.manual_indicator.text = ""
-                return True
-            else:
-                print(f"[CompetitorPanel] ✗ Error al guardar: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"[CompetitorPanel] ✗ Excepción: {e}")
-            return False
+    @mainthread
+    def show_status(self, text):
+        """Muestra un mensaje de estado temporal"""
+        self.status_indicator.text = text
+    
+    @mainthread
+    def clear_status(self):
+        """Limpia el mensaje de estado"""
+        self.status_indicator.text = ""
 
     def reset_scores(self):
-        """Reinicia puntajes manuales para nuevo round"""
-        self.manual_score = 0
-        self.manual_indicator.text = ""
+        """Reinicia puntajes para nuevo round (solo visual, no toca BD)"""
+        self.clear_status()
 
 
 # ------------------ PANEL CENTRAL CON CUENTA REGRESIVA ------------------
 class CenterPanel(BoxLayout):
     time_str = StringProperty("03:00")
     round_str = StringProperty("Round 1")
+    combat_started = BooleanProperty(False)  # ⭐ NUEVO: indica si el combate ha iniciado
 
     def __init__(self, duracion_round=180, duracion_descanso=60, numero_rounds=3, **kwargs):
         super().__init__(**kwargs)
@@ -326,6 +393,17 @@ class CenterPanel(BoxLayout):
             Color(1, 1, 1, 1)
             self.rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self.update_rect, size=self.update_rect)
+
+        # Indicador de estado del combate
+        self.combat_status_label = Label(
+            text="⏸ COMBATE NO INICIADO",
+            font_size=ResponsiveHelper.get_font_size(14),
+            color=(0.8, 0.2, 0.2, 1),
+            bold=True,
+            size_hint_y=None,
+            height=dp(25)
+        )
+        self.add_widget(self.combat_status_label)
 
         # Ronda actual
         round_title = Label(
@@ -403,9 +481,9 @@ class CenterPanel(BoxLayout):
         btn_layout.add_widget(btn_pause)
         
         btn_play = Button(
-            text="PLAY",
+            text="INICIAR",
             on_press=lambda x: self.start_timer(),
-            background_color=(0.1, 0.4, 0.7, 1),
+            background_color=(0.2, 0.7, 0.2, 1),  # Verde para resaltar
             color=(1, 1, 1, 1),
             font_size=ResponsiveHelper.get_font_size(16),
             bold=True
@@ -467,13 +545,35 @@ class CenterPanel(BoxLayout):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
     def start_timer(self):
+        """⭐ Inicia el timer y marca el combate como activo"""
         if not self.timer_running:
             self.timer_running = True
+            self.combat_started = True  # ⭐ Marcar combate como iniciado
+            self.combat_status_label.text = "▶ COMBATE EN CURSO"
+            self.combat_status_label.color = (0.2, 0.7, 0.2, 1)  # Verde
             Clock.schedule_interval(self.update_time, 1)
+            print("[CenterPanel] ▶ Timer iniciado - Combate ACTIVO")
+            
+            # Notificar al parent_screen
+            if hasattr(self, 'parent_screen') and self.parent_screen:
+                self.parent_screen.on_combat_started()
 
     def pause_timer(self):
+        """Pausa el timer pero el combate sigue activo"""
         self.timer_running = False
         Clock.unschedule(self.update_time)
+        if self.combat_started:
+            self.combat_status_label.text = "⏸ COMBATE PAUSADO"
+            self.combat_status_label.color = (0.8, 0.6, 0, 1)  # Amarillo
+        print("[CenterPanel] ⏸ Timer pausado")
+
+    def is_combat_active(self):
+        """⭐ Retorna True si el combate ha iniciado (aunque esté pausado)"""
+        return self.combat_started
+
+    def is_timer_running(self):
+        """Retorna True si el timer está corriendo activamente"""
+        return self.timer_running
 
     def update_time(self, dt):
         """Cuenta regresiva"""
@@ -497,9 +597,8 @@ class CenterPanel(BoxLayout):
         seconds = self.remaining_time % 60
         self.time_str = f"{minutes:02}:{seconds:02}"
         self.rest_indicator.text = "⏸ DESCANSO"
-        
-        if hasattr(self, 'parent_screen'):
-            self.parent_screen.save_manual_scores()
+        self.combat_status_label.text = "⏸ DESCANSO"
+        self.combat_status_label.color = (0.8, 0.6, 0, 1)
 
     def start_new_round(self):
         """Inicia un nuevo round después del descanso"""
@@ -509,6 +608,8 @@ class CenterPanel(BoxLayout):
         seconds = self.remaining_time % 60
         self.time_str = f"{minutes:02}:{seconds:02}"
         self.rest_indicator.text = ""
+        self.combat_status_label.text = "▶ COMBATE EN CURSO"
+        self.combat_status_label.color = (0.2, 0.7, 0.2, 1)
 
     def mostrar_mensaje(self, titulo, mensaje, confirm_callback=None):
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
@@ -605,9 +706,6 @@ class CenterPanel(BoxLayout):
         )
 
     def next_round(self, instance):
-        if hasattr(self, 'parent_screen'):
-            self.parent_screen.save_manual_scores()
-        
         self.round_number += 1
         self.round_str = f"Round {self.round_number}"
         self.round_label.text = self.round_str
@@ -628,14 +726,14 @@ class CenterPanel(BoxLayout):
         )
 
     def end_combat(self, instance):
-        if hasattr(self, 'parent_screen'):
-            self.parent_screen.save_manual_scores()
-        
         self.pause_timer()
+        self.combat_started = False  # ⭐ Marcar combate como terminado
         self.time_str = "FIN"
         self.time_label.text = self.time_str
         self.round_label.text = "Combate Finalizado"
         self.rest_indicator.text = ""
+        self.combat_status_label.text = "🏁 COMBATE FINALIZADO"
+        self.combat_status_label.color = (0.5, 0.5, 0.5, 1)
         self.mostrar_mensaje(
             titulo="Combate Finalizado",
             mensaje="El combate ha sido\ndado por finalizado"
@@ -662,7 +760,7 @@ class MainScreentabc(Screen):
         self.id_alumno_azul = None
         self.ws = None
         self.ws_thread = None
-        self.ws_keepalive = None  # ⭐ Timer para mantener vivo el WebSocket
+        self.ws_keepalive = None
         
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
@@ -705,7 +803,7 @@ class MainScreentabc(Screen):
             duracion_round, duracion_descanso, numero_rounds
         )
         
-        # ⭐ Conectar al WebSocket para actualizaciones en tiempo real
+        # Conectar al WebSocket para actualizaciones en tiempo real
         if self.combate_id and WEBSOCKET_AVAILABLE:
             self.connect_websocket()
         elif not WEBSOCKET_AVAILABLE:
@@ -736,8 +834,10 @@ class MainScreentabc(Screen):
             name=name1,
             color="#E53935",
             nationality=nat1,
-            alumno_id=self.id_alumno_rojo
+            alumno_id=self.id_alumno_rojo,
+            combate_id=self.combate_id
         )
+        self.com1_panel.parent_screen = self  # ⭐ Referencia para verificar timer
         main_layout.add_widget(self.com1_panel)
 
         # Panel Central
@@ -754,11 +854,23 @@ class MainScreentabc(Screen):
             name=name2,
             color="#1E88E5",
             nationality=nat2,
-            alumno_id=self.id_alumno_azul
+            alumno_id=self.id_alumno_azul,
+            combate_id=self.combate_id
         )
+        self.com2_panel.parent_screen = self  # ⭐ Referencia para verificar timer
         main_layout.add_widget(self.com2_panel)
 
         self.add_widget(main_layout)
+    
+    def is_timer_active(self):
+        """⭐ Verifica si el combate ha iniciado (timer activo)"""
+        if hasattr(self, 'center_panel') and self.center_panel:
+            return self.center_panel.is_combat_active()
+        return False
+    
+    def on_combat_started(self):
+        """⭐ Callback cuando el combate inicia"""
+        print("[MainScreentabc] 🟢 Combate iniciado - Puntos ahora serán aceptados")
     
     def connect_websocket(self):
         """⭐ Conecta al WebSocket del tablero para recibir actualizaciones en tiempo real"""
@@ -772,11 +884,17 @@ class MainScreentabc(Screen):
                 print(f"[WebSocket] 📨 Mensaje recibido: {data}")
                 
                 if data.get('event') == 'score_update':
-                    # ⭐ Actualización de puntaje en tiempo real
                     alumno_id = data.get('alumnoId')
                     new_count = data.get('count', 0)
                     
-                    # Actualizar el panel correspondiente
+                    # ⭐ VERIFICAR SI EL TIMER ESTÁ ACTIVO
+                    if not self.is_timer_active():
+                        print(f"[WebSocket] ⚠️ Timer NO activo - Eliminando punto de alumno {alumno_id}")
+                        # Eliminar el punto que acaba de llegar
+                        self.revert_score(alumno_id)
+                        return
+                    
+                    # Timer activo - Actualizar el panel correspondiente
                     if alumno_id == self.id_alumno_rojo:
                         print(f"[WebSocket] 🔴 Actualizando ROJO: {new_count}")
                         self.com1_panel.update_api_score(new_count)
@@ -786,7 +904,6 @@ class MainScreentabc(Screen):
                 
                 elif data.get('status') == 'connected':
                     print(f"[WebSocket] ✓ Conectado al combate {data.get('combateId')}")
-                    # Obtener puntajes iniciales
                     self.fetch_initial_scores()
                     
             except Exception as e:
@@ -797,20 +914,16 @@ class MainScreentabc(Screen):
         
         def on_close(ws, close_status_code, close_msg):
             print(f"[WebSocket] ✗ Conexión cerrada: {close_status_code} - {close_msg}")
-            # ⭐ Intentar reconectar después de 3 segundos
             if self.ws_keepalive:
                 Clock.schedule_once(lambda dt: self.reconnect_websocket(), 3)
         
         def on_open(ws):
             print(f"[WebSocket] ✓ Conexión establecida al combate {self.combate_id}")
-            # ⭐ Iniciar keepalive para evitar timeout
             self.start_keepalive()
         
-        # URL del WebSocket
         ws_url = f"ws://localhost:8080/ws/tablero/{self.combate_id}"
         print(f"\n[MainScreentabc] 🔌 Conectando a WebSocket: {ws_url}")
         
-        # Crear y ejecutar WebSocket en thread separado
         self.ws = websocket.WebSocketApp(
             ws_url,
             on_message=on_message,
@@ -822,8 +935,27 @@ class MainScreentabc(Screen):
         self.ws_thread = Thread(target=self.ws.run_forever, daemon=True)
         self.ws_thread.start()
     
+    def revert_score(self, alumno_id):
+        """⭐ Revierte (elimina) el último punto de un alumno cuando el timer no está activo"""
+        def work():
+            try:
+                url = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{alumno_id}/last"
+                response = requests.delete(url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"[MainScreentabc] ✓ Punto revertido para alumno {alumno_id}, nuevo count: {data.get('newCount', 0)}")
+                elif response.status_code == 204:
+                    print(f"[MainScreentabc] ✓ Punto revertido para alumno {alumno_id}")
+                else:
+                    print(f"[MainScreentabc] ⚠️ No se pudo revertir: {response.status_code}")
+            except Exception as e:
+                print(f"[MainScreentabc] ✗ Error revirtiendo punto: {e}")
+        
+        Thread(target=work, daemon=True).start()
+    
     def start_keepalive(self):
-        """⭐ Envía ping cada 30 segundos para mantener vivo el WebSocket"""
+        """Envía ping cada 30 segundos para mantener vivo el WebSocket"""
         def send_ping(dt):
             if self.ws and self.ws.sock and self.ws.sock.connected:
                 try:
@@ -832,16 +964,14 @@ class MainScreentabc(Screen):
                 except Exception as e:
                     print(f"[WebSocket] ✗ Error en keepalive: {e}")
         
-        # Cancelar keepalive anterior si existe
         if self.ws_keepalive:
             self.ws_keepalive.cancel()
         
-        # Programar ping cada 30 segundos
         self.ws_keepalive = Clock.schedule_interval(send_ping, 30)
         print("[WebSocket] ✓ Keepalive iniciado (ping cada 30s)")
     
     def reconnect_websocket(self):
-        """⭐ Intenta reconectar el WebSocket"""
+        """Intenta reconectar el WebSocket"""
         if self.combate_id and WEBSOCKET_AVAILABLE:
             print("[WebSocket] 🔄 Intentando reconectar...")
             self.connect_websocket()
@@ -850,7 +980,6 @@ class MainScreentabc(Screen):
         """Obtiene los puntajes iniciales al conectarse"""
         def work():
             try:
-                # Obtener puntaje del competidor rojo
                 if self.id_alumno_rojo:
                     url_rojo = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{self.id_alumno_rojo}/count"
                     response_rojo = requests.get(url_rojo, timeout=2)
@@ -859,7 +988,6 @@ class MainScreentabc(Screen):
                         self.com1_panel.update_api_score(count_rojo)
                         print(f"[MainScreentabc] 🔴 Puntaje inicial ROJO: {count_rojo}")
                 
-                # Obtener puntaje del competidor azul
                 if self.id_alumno_azul:
                     url_azul = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{self.id_alumno_azul}/count"
                     response_azul = requests.get(url_azul, timeout=2)
@@ -877,12 +1005,10 @@ class MainScreentabc(Screen):
     
     def disconnect_websocket(self):
         """Desconecta el WebSocket"""
-        # Cancelar keepalive
         if self.ws_keepalive:
             self.ws_keepalive.cancel()
             self.ws_keepalive = None
         
-        # Cerrar WebSocket
         if self.ws:
             try:
                 self.ws.close()
@@ -890,58 +1016,8 @@ class MainScreentabc(Screen):
             except Exception as e:
                 print(f"[MainScreentabc] ✗ Error al desconectar WebSocket: {e}")
     
-    def save_manual_scores(self):
-        """⭐ Guarda los puntajes manuales y actualiza UI inmediatamente"""
-        if not self.combate_id:
-            print("[MainScreentabc] ⚠️  No hay combate_id, no se pueden guardar puntos")
-            return
-        
-        print("[MainScreentabc] 💾 Guardando puntos manuales...")
-        
-        def work():
-            # Guardar puntos del competidor 1
-            if self.com1_panel.manual_score > 0:
-                success1 = self.com1_panel.save_manual_scores(self.combate_id)
-                if success1:
-                    # ⭐ Refrescar puntaje después de guardar
-                    self.refresh_score(self.id_alumno_rojo, self.com1_panel)
-            
-            # Guardar puntos del competidor 2
-            if self.com2_panel.manual_score > 0:
-                success2 = self.com2_panel.save_manual_scores(self.combate_id)
-                if success2:
-                    # ⭐ Refrescar puntaje después de guardar
-                    self.refresh_score(self.id_alumno_azul, self.com2_panel)
-            
-            self._show_save_success()
-        
-        Thread(target=work, daemon=True).start()
-    
-    def refresh_score(self, alumno_id, panel):
-        """⭐ Refresca el puntaje de un alumno específico"""
-        if not alumno_id:
-            return
-        
-        try:
-            url = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{alumno_id}/count"
-            response = requests.get(url, timeout=2)
-            if response.status_code == 200:
-                new_count = response.json().get('count', 0)
-                panel.update_api_score(new_count)
-                print(f"[MainScreentabc] ✅ Puntaje actualizado para alumno {alumno_id}: {new_count}")
-        except Exception as e:
-            print(f"[MainScreentabc] ✗ Error refrescando puntaje: {e}")
-    
-    @mainthread
-    def _show_save_success(self):
-        print("[MainScreentabc] ✓ Puntos guardados exitosamente")
-    
-    @mainthread
-    def _show_save_error(self):
-        print("[MainScreentabc] ✗ Error al guardar algunos puntos")
-    
     def reset_competitor_scores(self):
-        """Reinicia los contadores de puntos manuales"""
+        """Reinicia los contadores visuales para nuevo round"""
         self.com1_panel.reset_scores()
         self.com2_panel.reset_scores()
         
@@ -957,6 +1033,7 @@ class MainScreentabc(Screen):
             color="#E53935",
             nationality=""
         )
+        self.com1_panel.parent_screen = self
         main_layout.add_widget(self.com1_panel)
 
         self.center_panel = CenterPanel()
@@ -968,6 +1045,7 @@ class MainScreentabc(Screen):
             color="#1E88E5",
             nationality=""
         )
+        self.com2_panel.parent_screen = self
         main_layout.add_widget(self.com2_panel)
 
         self.add_widget(main_layout)
@@ -981,17 +1059,16 @@ class MainScreentabc(Screen):
         self.disconnect_websocket()
         return super().on_pre_leave(*args)
 
+
 # ------------------ APP DE PRUEBA ------------------
 if __name__ == '__main__':
     class TestApp(App):
         def build(self):
             sm = ScreenManager()
             
-            # Crear pantalla de tablero
             tablero = MainScreentabc(name='tablero_central')
             sm.add_widget(tablero)
             
-            # Simular datos del combate después de 2 segundos
             def simulate_combat_creation(dt):
                 print("\n" + "=" * 60)
                 print("🧪 SIMULACIÓN DE COMBATE")
@@ -1002,8 +1079,8 @@ if __name__ == '__main__':
                     'id': 1,
                     'idAlumnoRojo': 1,
                     'idAlumnoAzul': 2,
-                    'duracionRound': '00:01:00',  # 1 minuto para testing
-                    'duracionDescanso': '00:00:30',  # 30 segundos para testing
+                    'duracionRound': '00:01:00',
+                    'duracionDescanso': '00:00:30',
                     'numeroRounds': 3
                 }
                 
@@ -1016,8 +1093,9 @@ if __name__ == '__main__':
                 )
                 
                 print("\n✅ TABLERO CONFIGURADO")
-                print("📡 Los puntajes se actualizarán en tiempo real")
-                print("🎮 Conecta los ESP32 para ver actualizaciones automáticas")
+                print("⚠️  IMPORTANTE: Debes presionar INICIAR para que cuenten los puntos")
+                print("📡 Los puntajes se actualizan en tiempo real via WebSocket")
+                print("🎮 Los botones +/- guardan directamente en la BD")
                 print("=" * 60 + "\n")
             
             Clock.schedule_once(simulate_combat_creation, 2)
