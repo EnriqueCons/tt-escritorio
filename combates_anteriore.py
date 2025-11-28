@@ -97,7 +97,6 @@ class LightBlueButton(Button):
         self.font_size = ResponsiveHelper.get_font_size(16)
 
     def on_button_press(self, instance):
-        # Animación al presionar: reducir ligeramente el tamaño
         anim = Animation(
             size=(self.width * 0.95, self.height * 0.95),
             duration=0.1
@@ -105,7 +104,6 @@ class LightBlueButton(Button):
         anim.start(self)
 
     def on_button_release(self, instance):
-        # Animación al soltar: volver al tamaño original
         anim = Animation(
             size=(self.width / 0.95, self.height / 0.95),
             duration=0.1
@@ -407,7 +405,6 @@ class CombateCard(BoxLayout):
     def build_card(self):
         self.clear_widgets()
         
-        # Calcular altura según orientación de botones (más compacto)
         button_rows_height = dp(110) if Window.width > 600 else dp(220)
         self.height = dp(180) + button_rows_height
 
@@ -417,10 +414,9 @@ class CombateCard(BoxLayout):
             
             self.bind(pos=self.update_graphics, size=self.update_graphics)
 
-        # Título con badge del número de combate (más compacto)
+        # Header con badge
         header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(40), spacing=dp(10))
         
-        # Badge del número
         badge_label = Label(
             text=f'#{self.combate_data["numero"]}',
             font_size=ResponsiveHelper.get_font_size(18),
@@ -443,7 +439,7 @@ class CombateCard(BoxLayout):
             )
         
         header_box.add_widget(badge_label)
-        header_box.add_widget(BoxLayout())  # Spacer
+        header_box.add_widget(BoxLayout())
         
         self.add_widget(header_box)
 
@@ -466,7 +462,7 @@ class CombateCard(BoxLayout):
 
         self.add_widget(self.info_layout)
 
-        # Botones responsive sin iconos
+        # Botones
         if Window.width > 600:
             self.create_horizontal_buttons()
         else:
@@ -577,14 +573,26 @@ class CombateCard(BoxLayout):
         ).open()
 
     def open_edit_screen(self, instance):
+        """Abre la pantalla de edición con los datos del combate"""
         app = App.get_running_app()
-        if not app.root.has_screen('actualizar_combate'):
-            from actualizar_combate import ActualizarCombateScreen
-            app.root.add_widget(ActualizarCombateScreen(
-                name='actualizar_combate',
-                combate_data=self.combate_data,
-                on_save=self.on_edit_callback
-            ))
+        
+        # IMPORTANTE: Siempre remover la pantalla existente para crearla con nuevos datos
+        if app.root.has_screen('actualizar_combate'):
+            old_screen = app.root.get_screen('actualizar_combate')
+            app.root.remove_widget(old_screen)
+        
+        # Importar y crear nueva pantalla con los datos del combate
+        from actualizar_combate import ActualizarCombateScreen
+        
+        print(f"[CombateCard] Abriendo edición para combate: {self.combate_data}")
+        
+        new_screen = ActualizarCombateScreen(
+            name='actualizar_combate',
+            combate_data=self.combate_data,
+            on_save=self.on_edit_callback
+        )
+        
+        app.root.add_widget(new_screen)
         app.root.current = 'actualizar_combate'
 
     def open_password_flow(self, instance):
@@ -608,6 +616,7 @@ class CombateCard(BoxLayout):
         tablero_screen.com2_panel.nationality = self.combate_data.get('nacionalidad2', '')
         
         app.root.current = 'tablero'
+
 
 class CombatesScreen(Screen):
     """
@@ -709,7 +718,6 @@ class CombatesScreen(Screen):
         
         self.add_widget(self.layout)
         
-        # IMPORTANTE: Cargar combates desde la API
         self.load_combates()
 
     def update_rect(self, *args):
@@ -718,13 +726,17 @@ class CombatesScreen(Screen):
 
     def on_window_resize(self, instance, width, height):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
+    
+    def on_enter(self):
+        """Se ejecuta cada vez que se entra a la pantalla"""
+        # Recargar combates para mostrar cambios
+        self.load_combates()
 
     def load_combates(self):
         """Carga los combates desde la API"""
         print("[CombatesScreen] Iniciando carga de combates...")
         self.grid.clear_widgets()
         
-        # Mostrar indicador de carga
         loading_label = Label(
             text='Cargando combates...',
             font_size=ResponsiveHelper.get_font_size(18),
@@ -732,7 +744,6 @@ class CombatesScreen(Screen):
         )
         self.grid.add_widget(loading_label)
         
-        # Hacer la petición en un thread separado
         thread = Thread(target=self._fetch_combates)
         thread.daemon = True
         thread.start()
@@ -748,7 +759,6 @@ class CombatesScreen(Screen):
                 combates_data = api.get_all_combates()
                 print(f"[CombatesScreen] Recibidos {len(combates_data)} combates de la API")
             
-            # Ya no necesitas filtrar aquí porque el backend lo hace
             self.combates = [self._transform_combate(c) for c in combates_data]
             print(f"[CombatesScreen] Combates transformados: {len(self.combates)}")
             
@@ -761,7 +771,6 @@ class CombatesScreen(Screen):
             print(f"[CombatesScreen] Exception: {type(e).__name__}: {e}")
             error_msg = "No se pudo conectar al servidor" if "Connection" in str(e) else f"Error: {str(e)}"
             Clock.schedule_once(lambda dt: self._show_error(error_msg))
-
 
     def _transform_combate(self, api_data):
         """Transforma los datos de la API al formato que espera la UI"""
@@ -812,7 +821,6 @@ class CombatesScreen(Screen):
             return "Sin fecha"
         try:
             from datetime import datetime
-            # Manejar diferentes formatos
             if 'T' in str(datetime_str):
                 dt = datetime.fromisoformat(str(datetime_str).replace('Z', '+00:00'))
             else:
@@ -851,19 +859,22 @@ class CombatesScreen(Screen):
             return "Sin hora"
 
     def _parse_duration(self, time_str):
-        """Convierte LocalTime (HH:mm:ss) a minutos"""
+        """Convierte LocalTime (HH:mm:ss) a segundos"""
         if not time_str:
             return 0
         try:
             parts = str(time_str).split(':')
             if len(parts) >= 2:
-                return int(parts[0]) * 60 + int(parts[1])
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2]) if len(parts) > 2 else 0
+                return hours * 3600 + minutes * 60 + seconds
             return 0
         except:
             return 0
 
     def _display_combates(self):
-        """Muestra los combates en la UI (se ejecuta en el hilo principal)"""
+        """Muestra los combates en la UI"""
         self.grid.clear_widgets()
         
         if not self.combates:
@@ -905,7 +916,6 @@ class CombatesScreen(Screen):
         error_label.bind(size=error_label.setter('text_size'))
         error_box.add_widget(error_label)
         
-        # Botón para reintentar
         retry_btn = Button(
             text='Reintentar',
             size_hint=(None, None),
@@ -923,7 +933,7 @@ class CombatesScreen(Screen):
         self.grid.add_widget(error_box)
 
     def delete_combate(self, combate_data):
-        """Elimina un combate mediante la API usando ApiClient"""
+        """Elimina un combate mediante la API"""
         combate_id = combate_data['id']
         
         def _do_delete():
@@ -954,51 +964,10 @@ class CombatesScreen(Screen):
         self.load_combates()
 
     def edit_combate(self, combate_original, nuevos_datos):
-        """Actualiza un combate mediante la API usando ApiClient"""
-        combate_id = combate_original['id']
-        
-        def _do_update():
-            try:
-                # Transformar los datos al formato que espera tu API
-                payload = {
-                    "area": nuevos_datos.get("area", combate_original["area"]),
-                    "numeroRound": nuevos_datos.get("num_rounds", combate_original["num_rounds"]),
-                    "duracionRound": self._minutes_to_time(nuevos_datos.get("duracion_round", combate_original["duracion_round"])),
-                    "duracionDescanso": self._minutes_to_time(nuevos_datos.get("duracion_descanso", combate_original["duracion_descanso"])),
-                    "estado": nuevos_datos.get("estado", combate_original["estado"]),
-                }
-                
-                result = api.update_combate(combate_id, payload)
-                if result:
-                    Clock.schedule_once(lambda dt: self._on_update_success(combate_original))
-                else:
-                    Clock.schedule_once(
-                        lambda dt: self.show_message("Error", "No se pudo actualizar el combate")
-                    )
-            except RuntimeError as e:
-                Clock.schedule_once(
-                    lambda dt: self.show_message("Error", str(e))
-                )
-            except Exception as e:
-                Clock.schedule_once(
-                    lambda dt: self.show_message("Error", f"Error al actualizar: {str(e)}")
-                )
-        
-        thread = Thread(target=_do_update)
-        thread.daemon = True
-        thread.start()
-
-    def _minutes_to_time(self, minutes):
-        """Convierte minutos a formato HH:mm:ss"""
-        if not minutes:
-            return "00:00:00"
-        hours = int(minutes) // 60
-        mins = int(minutes) % 60
-        return f"{hours:02d}:{mins:02d}:00"
-
-    def _on_update_success(self, combate_original):
-        """Callback cuando se actualiza exitosamente"""
-        self.show_message("Éxito", f"Combate #{combate_original['numero']} actualizado correctamente")
+        """Callback cuando se edita un combate - se llama después de guardar"""
+        print(f"[CombatesScreen] Combate editado: {combate_original['numero']}")
+        print(f"[CombatesScreen] Nuevos datos: {nuevos_datos}")
+        # Recargar la lista de combates
         self.load_combates()
 
     def show_message(self, title, message):
