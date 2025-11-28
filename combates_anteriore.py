@@ -604,16 +604,22 @@ class CombateCard(BoxLayout):
         PasswordDisplayPopup(combate_numero=self.combate_data['numero']).open()
 
     def navigate_to_tablero(self, instance):
+        """Navega al tablero con todos los datos del combate"""
         app = App.get_running_app()
-        if not app.root.has_screen('tablero'):
-            from tablero import MainScreentab
-            app.root.add_widget(MainScreentab(name='tablero'))
         
-        tablero_screen = app.root.get_screen('tablero')
-        tablero_screen.com1_panel.name = self.combate_data.get('competidor1', 'COM1')
-        tablero_screen.com2_panel.name = self.combate_data.get('competidor2', 'COM2')
-        tablero_screen.com1_panel.nationality = self.combate_data.get('nacionalidad1', '')
-        tablero_screen.com2_panel.nationality = self.combate_data.get('nacionalidad2', '')
+        # Siempre recrear la pantalla para cargar datos frescos
+        if app.root.has_screen('tablero'):
+            old_screen = app.root.get_screen('tablero')
+            app.root.remove_widget(old_screen)
+        
+        from tablero import MainScreentab
+        tablero_screen = MainScreentab(name='tablero')
+        app.root.add_widget(tablero_screen)
+        
+        # Pasar todos los datos del combate al tablero
+        tablero_screen.set_combate_data(self.combate_data)
+        
+        print(f"[CombateCard] Navegando al tablero con datos: {self.combate_data}")
         
         app.root.current = 'tablero'
 
@@ -781,19 +787,21 @@ class CombatesScreen(Screen):
             "hora": self._format_time(api_data.get("horaCombate")),
             "categoria": api_data.get("area", "Sin categoría"),
             
-            # Competidor Rojo
-            "competidor1": api_data.get("competidorRojo", {}).get("nombres", "No disponible"),
-            "fecha_nac1": self._format_date_simple(api_data.get("competidorRojo", {}).get("fechaNacimiento", "")),
-            "peso1": api_data.get("competidorRojo", {}).get("pesoKg", 0),
-            "sexo1": api_data.get("competidorRojo", {}).get("sexo", ""),
-            "nacionalidad1": "Mexicana",
-            
-            # Competidor Azul
-            "competidor2": api_data.get("competidorAzul", {}).get("nombres", "No disponible"),
-            "fecha_nac2": self._format_date_simple(api_data.get("competidorAzul", {}).get("fechaNacimiento", "")),
-            "peso2": api_data.get("competidorAzul", {}).get("pesoKg", 0),
-            "sexo2": api_data.get("competidorAzul", {}).get("sexo", ""),
+            # Competidor Rojo (competidor2 en el tablero)
+            "competidor2": api_data.get("competidorRojo", {}).get("nombres", "No disponible"),
+            "fecha_nac2": self._format_date_simple(api_data.get("competidorRojo", {}).get("fechaNacimiento", "")),
+            "peso2": api_data.get("competidorRojo", {}).get("pesoKg", 0),
+            "sexo2": api_data.get("competidorRojo", {}).get("sexo", ""),
             "nacionalidad2": "Mexicana",
+            "alumno_id_rojo": api_data.get("competidorRojo", {}).get("id", 0),  # ID para puntaje
+            
+            # Competidor Azul (competidor1 en el tablero)
+            "competidor1": api_data.get("competidorAzul", {}).get("nombres", "No disponible"),
+            "fecha_nac1": self._format_date_simple(api_data.get("competidorAzul", {}).get("fechaNacimiento", "")),
+            "peso1": api_data.get("competidorAzul", {}).get("pesoKg", 0),
+            "sexo1": api_data.get("competidorAzul", {}).get("sexo", ""),
+            "nacionalidad1": "Mexicana",
+            "alumno_id_azul": api_data.get("competidorAzul", {}).get("id", 0),  # ID para puntaje
             
             # Detalles del combate
             "area": api_data.get("area", "Sin área"),

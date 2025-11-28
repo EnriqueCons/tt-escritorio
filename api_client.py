@@ -255,5 +255,76 @@ class ApiClient:
         r.raise_for_status()
         return r.json() if r.content else None
 
+    # ============ ENDPOINTS DE PUNTAJES ============
+    
+    def get_all_puntajes(self, timeout=None) -> list:
+        """
+        GET /apiPuntajes/puntaje
+        Devuelve la lista de todos los puntajes.
+        """
+        r = self.get_json("/apiPuntajes/puntaje", timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else []
+
+    def get_puntaje_by_id(self, puntaje_id: int, timeout=None) -> dict:
+        """
+        GET /apiPuntajes/puntaje/{id}
+        Devuelve un puntaje específico por su ID.
+        """
+        r = self.get_json(f"/apiPuntajes/puntaje/{puntaje_id}", timeout=timeout)
+        if r.status_code == 404:
+            raise RuntimeError(f"Puntaje {puntaje_id} no encontrado.")
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def create_puntaje(self, payload: dict, timeout=None) -> dict:
+        """
+        POST /apiPuntajes/puntaje
+        Crea un nuevo registro de puntaje.
+        """
+        r = self.post_json("/apiPuntajes/puntaje", payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def update_puntaje(self, puntaje_id: int, payload: dict, timeout=None) -> dict:
+        """
+        PUT /apiPuntajes/puntaje/{id}
+        Actualiza un puntaje existente.
+        """
+        r = self.put_json(f"/apiPuntajes/puntaje/{puntaje_id}", payload, timeout=timeout)
+        if r.status_code == 404:
+            raise RuntimeError(f"Puntaje {puntaje_id} no encontrado.")
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def delete_puntaje(self, puntaje_id: int, timeout=None) -> bool:
+        """
+        DELETE /apiPuntajes/puntaje/{id}
+        Elimina un puntaje por su ID.
+        """
+        r = self.delete(f"/apiPuntajes/puntaje/{puntaje_id}", timeout=timeout)
+        if r.status_code == 404:
+            raise RuntimeError(f"Puntaje {puntaje_id} no encontrado.")
+        r.raise_for_status()
+        return r.status_code in (200, 204)
+
+    def get_puntaje_count(self, alumno_id: int, timeout=None) -> int:
+        """
+        GET /apiPuntajes/puntaje/alumno/{alumnoId}/count
+        Obtiene el conteo de puntajes de un alumno.
+        Retorna: {"alumnoId": X, "count": Y}
+        Devuelve el valor de count (int).
+        """
+        try:
+            r = self.get_json(f"/apiPuntajes/puntaje/alumno/{alumno_id}/count", timeout=timeout)
+            if r.status_code == 404:
+                return 0
+            r.raise_for_status()
+            data = r.json() if r.content else {}
+            return int(data.get('count', 0))
+        except Exception as e:
+            print(f"[ApiClient] Error al obtener puntaje para alumno {alumno_id}: {e}")
+            return 0
+
 # Instancia global del cliente
 api = ApiClient()
