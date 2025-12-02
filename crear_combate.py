@@ -53,6 +53,28 @@ def hhmm_to_hhmmss(hm: str) -> str:
         return t.strftime("%H:%M:%S")
     except Exception:
         return datetime.now().strftime("%H:%M:%S")
+    
+def dividir_nombre_completo(nombre_completo: str) -> dict:
+    partes = nombre_completo.strip().split()
+    
+    if len(partes) == 0:
+        return {"nombres": "", "paterno": None, "materno": None}
+    elif len(partes) == 1:
+        # Solo un nombre
+        return {"nombres": partes[0], "paterno": None, "materno": None}
+    elif len(partes) == 2:
+        # Un nombre y un apellido
+        return {"nombres": partes[0], "paterno": partes[1], "materno": None}
+    elif len(partes) == 3:
+        # Un nombre y dos apellidos
+        return {"nombres": partes[0], "paterno": partes[1], "materno": partes[2]}
+    else:
+        # Más de 3 partes: asumimos que los últimos dos son apellidos
+        # y todo lo demás son nombres
+        apellido_materno = partes[-1]
+        apellido_paterno = partes[-2]
+        nombres = " ".join(partes[:-2])
+        return {"nombres": nombres, "paterno": apellido_paterno, "materno": apellido_materno}
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -888,10 +910,14 @@ class CrearCombateScreen(Screen):
         fn1_iso   = ddmmyyyy_to_iso(fn1_dmy)
         fn2_iso   = ddmmyyyy_to_iso(fn2_dmy)
 
-        # —— Variante A (DTO anidado) ——
+        nombre_comp1 = dividir_nombre_completo(self.competidor1_input.text.strip())
+        nombre_comp2 = dividir_nombre_completo(self.competidor2_input.text.strip())
+
         payload = {
             "competidorRojo": {
-                "nombres": self.competidor1_input.text.strip(),
+                "nombreAlumno": nombre_comp1["nombres"],
+                "paternoAlumno": nombre_comp1["paterno"],
+                "maternoAlumno": nombre_comp1["materno"],
                 "fechaNacimiento": fn1_iso,
                 "pesoKg": float(self.peso1_input.text),
                 "alturaCm": float(self.altura1_input.text),
@@ -899,7 +925,9 @@ class CrearCombateScreen(Screen):
                 "nacionalidad": self.nacionalidad1_input.text.strip()
             },
             "competidorAzul": {
-                "nombres": self.competidor2_input.text.strip(),
+                "nombreAlumno": nombre_comp2["nombres"],
+                "paternoAlumno": nombre_comp2["paterno"],
+                "maternoAlumno": nombre_comp2["materno"],
                 "fechaNacimiento": fn2_iso,
                 "pesoKg": float(self.peso2_input.text),
                 "alturaCm": float(self.altura2_input.text),
@@ -952,6 +980,12 @@ class CrearCombateScreen(Screen):
                         print(f"[CrearCombate] Usando torneo: {ultimo_torneo.get('nombre')} (ID: {ultimo_torneo.get('idTorneo')})")
                 except:
                     pass  # No es crítico si falla
+
+                print("=" * 60)
+                print("[DEBUG] PAYLOAD COMPLETO:")
+                import json
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+                print("=" * 60)
                 
                 creado = api.create_combate(payload)         # POST
                 combate_id = creado.get("id") or creado.get("idCombate")
@@ -994,7 +1028,7 @@ class CrearCombateScreen(Screen):
         # Mostrar mensaje de éxito
         self.mostrar_mensaje(
             "¡Combate creado!",
-            (f"ID: {combate_id}\n"
+            ( f"ID: {combate_id}\n"
             f"{c1} vs {c2}\n"
             f"Categoría: {categoria_peso}\n"
             f"Rounds: {num_rounds} | Round: {duracion_round} | Descanso: {duracion_descanso}\n"
@@ -1014,11 +1048,11 @@ class CrearCombateScreen(Screen):
             combate_data = {
                 'idCombate': creado.get('idCombate') or creado.get('id'),
                 'id': creado.get('id') or creado.get('idCombate'),
-                'idAlumnoRojo': creado.get('idAlumnoRojo'),  # ✅ Ya viene del backend
-                'idAlumnoAzul': creado.get('idAlumnoAzul'),  # ✅ Ya viene del backend
-                'duracionRound': creado.get('duracionRound'),      # ✅ Ya viene del backend
-                'duracionDescanso': creado.get('duracionDescanso'), # ✅ Ya viene del backend
-                'numeroRounds': creado.get('numeroRounds')         # ✅ Ya viene del backend
+                'idAlumnoRojo': creado.get('idAlumnoRojo'), 
+                'idAlumnoAzul': creado.get('idAlumnoAzul'), 
+                'duracionRound': creado.get('duracionRound'),     
+                'duracionDescanso': creado.get('duracionDescanso'), 
+                'numeroRounds': creado.get('numeroRounds')        
             }
             
             # Debug: Verificar datos recibidos
@@ -1032,7 +1066,7 @@ class CrearCombateScreen(Screen):
             
             # Verificar que tenemos los IDs necesarios
             if not combate_data['idAlumnoRojo'] or not combate_data['idAlumnoAzul']:
-                print("[ERROR] ❌ El backend NO devolvió los IDs de alumnos")
+                print("[ERROR] El backend NO devolvió los IDs de alumnos")
                 print("[ERROR] Verifica que modificaste correctamente el método save() en el backend")
             
             # Configurar el tablero con todos los datos
@@ -1047,7 +1081,7 @@ class CrearCombateScreen(Screen):
             # Cambiar a la pantalla del tablero
             sm.current = 'tablero_central'
             
-            print(f"[SUCCESS] ✅ Tablero configurado correctamente")
+            print(f"[SUCCESS] Tablero configurado correctamente")
         
         # Limpiar campos del formulario
         for widget in self.walk():

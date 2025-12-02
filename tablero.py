@@ -10,6 +10,8 @@ from kivy.metrics import dp, sp
 from kivy.utils import platform
 from kivy.clock import Clock
 from threading import Thread
+from threading import Thread
+from kivy.clock import Clock
 
 # Importar cliente API si está disponible
 try:
@@ -290,21 +292,58 @@ class CompetitorPanel(BoxLayout):
         thread.daemon = True
         thread.start()
 
+    def load_gamjeom_from_api(self, combate_id):
+        """Carga las faltas GAM-JEOM desde la API"""
+        if not API_AVAILABLE or not api or self.alumno_id <= 0 or not combate_id:
+            return
+        
+        def _fetch_gamjeom():
+            try:
+                import requests
+                url = f"http://localhost:8080/apiGamJeom/falta/alumno/{self.alumno_id}/combate/{combate_id}/count"
+                response = requests.get(url, timeout=2)
+                if response.status_code == 200:
+                    data = response.json()
+                    count = data.get('count', 0)
+                    Clock.schedule_once(lambda dt: self._update_gamjeom_from_api(count))
+            except Exception as e:
+                print(f"[CompetitorPanel] Error al obtener GAM-JEOM: {e}")
+    
+        thread = Thread(target=_fetch_gamjeom)
+        thread.daemon = True
+        thread.start()
+
+    def _update_gamjeom_from_api(self, count):
+        """Actualiza las faltas GAM-JEOM en el hilo principal"""
+        if count is not None:
+            self.penalty_score = count
+
     def _update_score_from_api(self, count):
         """Actualiza el puntaje en el hilo principal"""
         if count is not None:
             self.score = count
 
-    def start_score_refresh(self, interval=2.0):
-        """Inicia la actualización periódica del puntaje"""
+    def start_score_refresh(self, combate_id=None, interval=2.0):
+        """Inicia la actualización periódica del puntaje y GAM-JEOM"""
         self.stop_score_refresh()
+        self.combate_id_for_refresh = combate_id
+        
         if self.alumno_id > 0:
-            self.load_score_from_api()  # Cargar inmediatamente
+            self.load_score_from_api()  # Cargar puntaje inmediatamente
+            if combate_id:
+                self.load_gamjeom_from_api(combate_id)  # Cargar GAM-JEOM inmediatamente
+            
             self.score_refresh_event = Clock.schedule_interval(
-                lambda dt: self.load_score_from_api(), 
+                lambda dt: self._refresh_all_data(), 
                 interval
             )
 
+    def _refresh_all_data(self):
+        """Refresca tanto puntajes como GAM-JEOM"""
+        self.load_score_from_api()
+        if hasattr(self, 'combate_id_for_refresh') and self.combate_id_for_refresh:
+            self.load_gamjeom_from_api(self.combate_id_for_refresh)
+    
     def stop_score_refresh(self):
         """Detiene la actualización periódica del puntaje"""
         if self.score_refresh_event:
@@ -378,7 +417,7 @@ class CenterPanel(BoxLayout):
 
         # Etiqueta "RONDA"
         ronda_label = Label(
-            text="RONDA",
+            text="RONDAS",
             font_size=ResponsiveHelper.get_font_size(18),
             color=(0.2, 0.2, 0.2, 1),
             size_hint_y=None,
@@ -388,7 +427,7 @@ class CenterPanel(BoxLayout):
 
         # Número de ronda con total
         self.round_label = Label(
-            text=f"{self.round_num} / {self.total_rounds}",
+            text=f"{self.total_rounds}",
             font_size=ResponsiveHelper.get_font_size(45),
             color=(0.1, 0.4, 0.7, 1),
             bold=True,
@@ -693,10 +732,21 @@ class MainScreentab(Screen):
         self.com1_panel.update_layout()
         self.com2_panel.update_layout()
         self.center_panel.update_layout()
-        
-        # Iniciar actualización de puntajes desde la API
-        self.com1_panel.start_score_refresh(interval=2.0)
-        self.com2_panel.start_score_refresh(interval=2.0)
+
+        # Obtener ID del combate
+        combate_id = data.get('idCombate') or data.get('id') or data.get('combate_id')
+
+        # Cargar puntajes y GAM-JEOM UNA SOLA VEZ
+        self.com1_panel.load_score_from_api()
+        self.com2_panel.load_score_from_api()
+
+        if combate_id:
+            self.com1_panel.load_gamjeom_from_api(combate_id)
+            self.com2_panel.load_gamjeom_from_api(combate_id)
+        else:
+            print("[Tablero] ⚠️ No se proporcionó ID de combate, no se cargarán GAM-JEOM")
+
+        # NO llamar a start_score_refresh() - así no hay polling
 
     def set_combate_data(self, data):
         """Establece los datos del combate"""

@@ -21,9 +21,9 @@ try:
 except ImportError:
     WEBSOCKET_AVAILABLE = False
     print("=" * 60)
-    print("⚠️  ADVERTENCIA: websocket-client no instalado")
-    print("   Ejecuta: pip install websocket-client")
-    print("   Las actualizaciones en tiempo real NO funcionarán")
+    print("  ADVERTENCIA: websocket-client no instalado")
+    print("  Ejecuta: pip install websocket-client")
+    print("  Las actualizaciones en tiempo real NO funcionarán")
     print("=" * 60)
 
 
@@ -87,9 +87,10 @@ class CompetitorPanel(BoxLayout):
         self.alumno_id = alumno_id
         self.combate_id = combate_id
         self.parent_screen = None  # Referencia a MainScreentabc
+        self.max_gamjeom = 5  # Máximo de faltas antes de descalificación
         
         self.build_ui()
-        Window.bind(on_resize=self.on_window_resize)
+        # Window.bind(on_resize=self.on_window_resize)
 
     def build_ui(self):
         self.clear_widgets()
@@ -189,7 +190,7 @@ class CompetitorPanel(BoxLayout):
         )
         self.add_widget(gam_jeom_label)
 
-        # Penalizaciones
+        # Penalizaciones GAM-JEOM
         penalty_layout = BoxLayout(
             size_hint_y=None,
             height=dp(70),
@@ -199,7 +200,7 @@ class CompetitorPanel(BoxLayout):
         
         btn_minus_penalty = Button(
             text="-",
-            on_press=lambda x: self.update_penalty(-1),
+            on_press=lambda x: self.subtract_gamjeom_api(),
             font_size=ResponsiveHelper.get_font_size(25),
             background_color=(0.2, 0.2, 0.2, 1),
             color=(1, 1, 1, 1),
@@ -217,7 +218,7 @@ class CompetitorPanel(BoxLayout):
         
         btn_plus_penalty = Button(
             text="+",
-            on_press=lambda x: self.update_penalty(1),
+            on_press=lambda x: self.add_gamjeom_api(),
             font_size=ResponsiveHelper.get_font_size(25),
             background_color=(0.2, 0.2, 0.2, 1),
             color=(1, 1, 1, 1),
@@ -226,6 +227,16 @@ class CompetitorPanel(BoxLayout):
         penalty_layout.add_widget(btn_plus_penalty)
         
         self.add_widget(penalty_layout)
+
+        # Indicador de estado GAM-JEOM
+        self.gamjeom_status = Label(
+            text="",
+            font_size=ResponsiveHelper.get_font_size(12),
+            color=(1, 0.5, 0.5, 1),
+            size_hint_y=None,
+            height=dp(20)
+        )
+        self.add_widget(self.gamjeom_status)
 
         # Espaciador final
         self.add_widget(BoxLayout(size_hint_y=0.1))
@@ -237,39 +248,33 @@ class CompetitorPanel(BoxLayout):
     def on_window_resize(self, instance, width, height):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
-    def update_penalty(self, value):
-        self.penalty_score += value
-        if self.penalty_score < 0:
-            self.penalty_score = 0
-        self.penalty_label.text = str(self.penalty_score)
+    # ==================== MÉTODOS DE PUNTAJE ====================
 
     def add_score_api(self):
         """ Suma 1 punto directamente en la BD (tiempo real) """
         if not self.alumno_id or not self.combate_id:
-            print("[CompetitorPanel] ⚠️ No hay alumno_id o combate_id")
+            print("[CompetitorPanel] No hay alumno_id o combate_id")
             return
     
         # Verificar si el timer está activo
         if self.parent_screen and not self.parent_screen.is_timer_active():
-            self.show_status("⚠️ Inicia el timer primero")
-            print("[CompetitorPanel] ⚠️ Timer no activo, no se puede sumar")
+            self.show_status("Inicia el timer primero")
+            print("[CompetitorPanel] Timer no activo, no se puede sumar")
             return
     
         self.show_status("Guardando...")
     
         def work():
             try:
-                #  CAMBIO: Usar el endpoint simplificado con parámetros
                 url = f"http://localhost:8080/apiPuntajes/puntaje/simple?combateId={self.combate_id}&alumnoId={self.alumno_id}&valorPuntaje=1"
                 response = requests.post(url, timeout=5)
                 
                 if response.status_code in [200, 201]:
                     data = response.json()
-                    print(f"[CompetitorPanel] ✓ +1 punto guardado para alumno {self.alumno_id}")
-                    # Actualizar el score con el nuevo count
+                    print(f"[CompetitorPanel] +1 punto guardado para alumno {self.alumno_id}")
                     new_count = data.get('newCount', 0)
                     self.update_api_score(new_count)
-                    self.show_status("✓ +1")
+                    self.show_status("+1")
                     Clock.schedule_once(lambda dt: self.clear_status(), 1)
                 else:
                     print(f"[CompetitorPanel] ✗ Error al guardar: {response.status_code}")
@@ -281,20 +286,20 @@ class CompetitorPanel(BoxLayout):
         Thread(target=work, daemon=True).start()
 
     def subtract_score_api(self):
-        """⭐ Resta 1 punto (elimina el último registro de la BD)"""
+        """Resta 1 punto (elimina el último registro de la BD)"""
         if not self.alumno_id:
-            print("[CompetitorPanel] ⚠️ No hay alumno_id")
+            print("[CompetitorPanel] No hay alumno_id")
             return
         
         # Verificar si el timer está activo
         if self.parent_screen and not self.parent_screen.is_timer_active():
-            self.show_status("⚠️ Inicia el timer primero")
-            print("[CompetitorPanel] ⚠️ Timer no activo, no se puede restar")
+            self.show_status("Inicia el timer primero")
+            print("[CompetitorPanel] Timer no activo, no se puede restar")
             return
         
         # No permitir restar si ya está en 0
         if self.api_score <= 0:
-            self.show_status("⚠️ Ya está en 0")
+            self.show_status("Ya está en 0")
             return
         
         self.show_status("Eliminando...")
@@ -309,7 +314,7 @@ class CompetitorPanel(BoxLayout):
                     new_count = data.get('newCount', 0)
                     print(f"[CompetitorPanel] ✓ -1 punto eliminado para alumno {self.alumno_id}, nuevo total: {new_count}")
                     self.update_api_score(new_count)
-                    self.show_status("✓ -1")
+                    self.show_status("-1")
                     Clock.schedule_once(lambda dt: self.clear_status(), 1)
                 elif response.status_code == 204:
                     print(f"[CompetitorPanel] ✓ Punto eliminado")
@@ -344,7 +349,7 @@ class CompetitorPanel(BoxLayout):
 
     @mainthread
     def update_api_score(self, new_score):
-        """⭐ Actualiza el puntaje desde el WebSocket en tiempo real"""
+        """Actualiza el puntaje desde el WebSocket en tiempo real"""
         self.api_score = new_score
         self.score_label.text = str(self.api_score)
         print(f"[CompetitorPanel] 📊 Score actualizado: {self.name} = {self.api_score}")
@@ -359,29 +364,159 @@ class CompetitorPanel(BoxLayout):
         """Limpia el mensaje de estado"""
         self.status_indicator.text = ""
 
+    # ==================== MÉTODOS DE GAM-JEOM ====================
+
+    def add_gamjeom_api(self):
+        """Suma 1 falta GAM-JEOM directamente en la BD"""
+        if not self.alumno_id or not self.combate_id:
+            print("[CompetitorPanel] No hay alumno_id o combate_id")
+            return
+        
+        # Verificar si el timer está activo
+        if self.parent_screen and not self.parent_screen.is_timer_active():
+            self.show_gamjeom_status("Inicia el timer primero")
+            print("[CompetitorPanel] Timer no activo, no se puede agregar falta")
+            return
+        
+        self.show_gamjeom_status("Registrando falta...")
+        
+        def work():
+            try:
+                url = f"http://localhost:8080/apiGamJeom/falta/simple?combateId={self.combate_id}&alumnoId={self.alumno_id}"
+                response = requests.post(url, timeout=5)
+                
+                if response.status_code in [200, 201]:
+                    data = response.json()
+                    total_faltas = data.get('totalFaltas', 0)
+                    descalificado = data.get('descalificado', False)
+                    
+                    print(f"[CompetitorPanel]  +1 falta registrada para alumno {self.alumno_id}, total: {total_faltas}")
+                    self.update_gamjeom_count(total_faltas)
+                    
+                    if descalificado:
+                        self.show_gamjeom_status("DESCALIFICADO")
+                        # Notificar al parent_screen para terminar el combate
+                        if self.parent_screen:
+                            self.parent_screen.on_player_disqualified(self.alumno_id, self.name)
+                    else:
+                        self.show_gamjeom_status(f"Falta {total_faltas}/5")
+                        Clock.schedule_once(lambda dt: self.clear_gamjeom_status(), 2)
+                else:
+                    print(f"[CompetitorPanel] ✗ Error al registrar falta: {response.status_code}")
+                    self.show_gamjeom_status(f"✗ Error {response.status_code}")
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Excepción: {e}")
+                self.show_gamjeom_status("✗ Error conexión")
+        
+        Thread(target=work, daemon=True).start()
+
+    def subtract_gamjeom_api(self):
+        """Resta 1 falta GAM-JEOM (elimina la última)"""
+        if not self.alumno_id or not self.combate_id:
+            print("[CompetitorPanel] No hay alumno_id o combate_id")
+            return
+        
+        # Verificar si el timer está activo
+        if self.parent_screen and not self.parent_screen.is_timer_active():
+            self.show_gamjeom_status("Inicia el timer primero")
+            return
+        
+        # No permitir restar si ya está en 0
+        if self.penalty_score <= 0:
+            self.show_gamjeom_status("Ya está en 0")
+            return
+        
+        self.show_gamjeom_status("Eliminando falta...")
+        
+        def work():
+            try:
+                url = f"http://localhost:8080/apiGamJeom/falta/alumno/{self.alumno_id}/combate/{self.combate_id}/last"
+                response = requests.delete(url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    new_count = data.get('newCount', 0)
+                    print(f"[CompetitorPanel]  -1 falta eliminada para alumno {self.alumno_id}, nuevo total: {new_count}")
+                    self.update_gamjeom_count(new_count)
+                    self.show_gamjeom_status("Falta eliminada")
+                    Clock.schedule_once(lambda dt: self.clear_gamjeom_status(), 1)
+                else:
+                    print(f"[CompetitorPanel] ✗ Error al eliminar falta: {response.status_code}")
+                    self.show_gamjeom_status(f"✗ Error {response.status_code}")
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Excepción: {e}")
+                self.show_gamjeom_status("✗ Error conexión")
+        
+        Thread(target=work, daemon=True).start()
+
+    def refresh_gamjeom(self):
+        """Refresca el conteo de faltas desde la API"""
+        if not self.alumno_id or not self.combate_id:
+            return
+        
+        def work():
+            try:
+                url = f"http://localhost:8080/apiGamJeom/falta/alumno/{self.alumno_id}/combate/{self.combate_id}/count"
+                response = requests.get(url, timeout=2)
+                if response.status_code == 200:
+                    data = response.json()
+                    new_count = data.get('count', 0)
+                    self.update_gamjeom_count(new_count)
+            except Exception as e:
+                print(f"[CompetitorPanel] ✗ Error refrescando faltas: {e}")
+        
+        Thread(target=work, daemon=True).start()
+
+    @mainthread
+    def update_gamjeom_count(self, count):
+        """Actualiza el contador visual de faltas"""
+        self.penalty_score = count
+        self.penalty_label.text = str(count)
+        
+        # Cambiar color si está cerca del límite
+        if count >= 4:
+            self.penalty_label.color = (1, 0.3, 0.3, 1)  # Rojo
+        elif count >= 3:
+            self.penalty_label.color = (1, 0.7, 0.3, 1)  # Naranja
+        else:
+            self.penalty_label.color = (1, 1, 1, 1)  # Blanco
+        
+        print(f"[CompetitorPanel] ⚠️ GAM-JEOM actualizado: {self.name} = {count}")
+
+    @mainthread
+    def show_gamjeom_status(self, text):
+        """Muestra un mensaje de estado para GAM-JEOM"""
+        self.gamjeom_status.text = text
+    
+    @mainthread
+    def clear_gamjeom_status(self):
+        """Limpia el mensaje de estado de GAM-JEOM"""
+        self.gamjeom_status.text = ""
+
     def reset_scores(self):
         """Reinicia puntajes para nuevo round (solo visual, no toca BD)"""
         self.clear_status()
+        self.clear_gamjeom_status()
 
 
 # ------------------ PANEL CENTRAL CON CUENTA REGRESIVA ------------------
 class CenterPanel(BoxLayout):
     time_str = StringProperty("03:00")
     round_str = StringProperty("Round 1")
-    combat_started = BooleanProperty(False)  # ⭐ NUEVO: indica si el combate ha iniciado
+    combat_started = BooleanProperty(False)
 
     def __init__(self, duracion_round=180, duracion_descanso=60, numero_rounds=3, **kwargs):
         super().__init__(**kwargs)
         self.timer_running = False
         self.round_number = 1
         self.numero_rounds = numero_rounds
-        self.duracion_round = duracion_round  # en segundos
-        self.duracion_descanso = duracion_descanso  # en segundos
+        self.duracion_round = duracion_round
+        self.duracion_descanso = duracion_descanso
         self.remaining_time = duracion_round
         self.is_rest_time = False
         
         self.build_ui()
-        Window.bind(on_resize=self.on_window_resize)
+        # Window.bind(on_resize=self.on_window_resize)
 
     def build_ui(self):
         self.clear_widgets()
@@ -483,7 +618,7 @@ class CenterPanel(BoxLayout):
         btn_play = Button(
             text="INICIAR",
             on_press=lambda x: self.start_timer(),
-            background_color=(0.2, 0.7, 0.2, 1),  # Verde para resaltar
+            background_color=(0.2, 0.7, 0.2, 1),
             color=(1, 1, 1, 1),
             font_size=ResponsiveHelper.get_font_size(16),
             bold=True
@@ -545,16 +680,15 @@ class CenterPanel(BoxLayout):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
     def start_timer(self):
-        """⭐ Inicia el timer y marca el combate como activo"""
+        """Inicia el timer y marca el combate como activo"""
         if not self.timer_running:
             self.timer_running = True
-            self.combat_started = True  # ⭐ Marcar combate como iniciado
-            self.combat_status_label.text = "▶ COMBATE EN CURSO"
-            self.combat_status_label.color = (0.2, 0.7, 0.2, 1)  # Verde
+            self.combat_started = True  
+            self.combat_status_label.text = "COMBATE EN CURSO"
+            self.combat_status_label.color = (0.2, 0.7, 0.2, 1)
             Clock.schedule_interval(self.update_time, 1)
-            print("[CenterPanel] ▶ Timer iniciado - Combate ACTIVO")
+            print("[CenterPanel] Timer iniciado - Combate ACTIVO")
             
-            # Notificar al parent_screen
             if hasattr(self, 'parent_screen') and self.parent_screen:
                 self.parent_screen.on_combat_started()
 
@@ -563,12 +697,12 @@ class CenterPanel(BoxLayout):
         self.timer_running = False
         Clock.unschedule(self.update_time)
         if self.combat_started:
-            self.combat_status_label.text = "⏸ COMBATE PAUSADO"
-            self.combat_status_label.color = (0.8, 0.6, 0, 1)  # Amarillo
-        print("[CenterPanel] ⏸ Timer pausado")
+            self.combat_status_label.text = "COMBATE PAUSADO"
+            self.combat_status_label.color = (0.8, 0.6, 0, 1)
+        print("[CenterPanel] Timer pausado")
 
     def is_combat_active(self):
-        """⭐ Retorna True si el combate ha iniciado (aunque esté pausado)"""
+        """Retorna True si el combate ha iniciado (aunque esté pausado)"""
         return self.combat_started
 
     def is_timer_running(self):
@@ -592,6 +726,7 @@ class CenterPanel(BoxLayout):
     def start_rest_period(self):
         """Inicia el período de descanso"""
         self.is_rest_time = True
+        self.combat_started = False
         self.remaining_time = self.duracion_descanso
         minutes = self.remaining_time // 60
         seconds = self.remaining_time % 60
@@ -603,13 +738,25 @@ class CenterPanel(BoxLayout):
     def start_new_round(self):
         """Inicia un nuevo round después del descanso"""
         self.is_rest_time = False
+        self.combat_started = True
         self.remaining_time = self.duracion_round
         minutes = self.remaining_time // 60
         seconds = self.remaining_time % 60
         self.time_str = f"{minutes:02}:{seconds:02}"
         self.rest_indicator.text = ""
-        self.combat_status_label.text = "▶ COMBATE EN CURSO"
+        self.combat_status_label.text = "COMBATE EN CURSO"
         self.combat_status_label.color = (0.2, 0.7, 0.2, 1)
+
+    def end_combat_by_disqualification(self, player_name):
+        """Termina el combate por descalificación (5 GAM-JEOM)"""
+        self.pause_timer()
+        self.combat_started = False
+        self.time_str = "FIN"
+        self.time_label.text = self.time_str
+        self.round_label.text = "DESCALIFICACIÓN"
+        self.rest_indicator.text = f" {player_name}"
+        self.combat_status_label.text = " COMBATE TERMINADO"
+        self.combat_status_label.color = (0.8, 0.2, 0.2, 1)
 
     def mostrar_mensaje(self, titulo, mensaje, confirm_callback=None):
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
@@ -727,7 +874,7 @@ class CenterPanel(BoxLayout):
 
     def end_combat(self, instance):
         self.pause_timer()
-        self.combat_started = False  # ⭐ Marcar combate como terminado
+        self.combat_started = False
         self.time_str = "FIN"
         self.time_label.text = self.time_str
         self.round_label.text = "Combate Finalizado"
@@ -763,10 +910,10 @@ class MainScreentabc(Screen):
         self.ws_keepalive = None
         
         self.build_ui()
-        Window.bind(on_resize=self.on_window_resize)
+        # Window.bind(on_resize=self.on_window_resize)
     
     def set_competitors(self, name1, nat1, name2, nat2, combate_data=None):
-        """⭐ Configura los competidores y datos del combate"""
+        """Configura los competidores y datos del combate"""
         print("\n" + "=" * 60)
         print("[MainScreentabc] 🥋 CONFIGURANDO COMPETIDORES")
         print(f"  🔴 Rojo: {name1} ({nat1})")
@@ -807,7 +954,7 @@ class MainScreentabc(Screen):
         if self.combate_id and WEBSOCKET_AVAILABLE:
             self.connect_websocket()
         elif not WEBSOCKET_AVAILABLE:
-            print("⚠️  WebSocket no disponible - instala websocket-client")
+            print("⚠️ WebSocket no disponible - instala websocket-client")
     
     def parse_time_to_seconds(self, time_str):
         """Convierte HH:MM:SS a segundos totales"""
@@ -837,7 +984,7 @@ class MainScreentabc(Screen):
             alumno_id=self.id_alumno_rojo,
             combate_id=self.combate_id
         )
-        self.com1_panel.parent_screen = self  # ⭐ Referencia para verificar timer
+        self.com1_panel.parent_screen = self 
         main_layout.add_widget(self.com1_panel)
 
         # Panel Central
@@ -857,23 +1004,47 @@ class MainScreentabc(Screen):
             alumno_id=self.id_alumno_azul,
             combate_id=self.combate_id
         )
-        self.com2_panel.parent_screen = self  # ⭐ Referencia para verificar timer
+        self.com2_panel.parent_screen = self
         main_layout.add_widget(self.com2_panel)
 
         self.add_widget(main_layout)
     
     def is_timer_active(self):
-        """⭐ Verifica si el combate ha iniciado (timer activo)"""
+        """Verifica si el combate ha iniciado (timer activo)"""
         if hasattr(self, 'center_panel') and self.center_panel:
             return self.center_panel.is_combat_active()
         return False
     
     def on_combat_started(self):
-        """⭐ Callback cuando el combate inicia"""
-        print("[MainScreentabc] 🟢 Combate iniciado - Puntos ahora serán aceptados")
+        """Callback cuando el combate inicia"""
+        print("[MainScreentabc] 🟢 Combate iniciado - Puntos y faltas ahora serán aceptados")
+        # Cargar faltas iniciales
+        self.fetch_initial_gamjeom()
+
+    def on_player_disqualified(self, alumno_id, player_name):
+        """Callback cuando un jugador es descalificado por 5 GAM-JEOM"""
+        print(f"\n{'='*60}")
+        print(f"🚨 DESCALIFICACIÓN: {player_name} (ID: {alumno_id})")
+        print(f"   Ha acumulado 5 faltas GAM-JEOM")
+        print(f"{'='*60}\n")
+        
+        # Determinar el ganador
+        if alumno_id == self.id_alumno_rojo:
+            winner = self.com2_panel.name
+        else:
+            winner = self.com1_panel.name
+        
+        # Terminar el combate
+        self.center_panel.end_combat_by_disqualification(player_name)
+        
+        # Mostrar mensaje
+        self.center_panel.mostrar_mensaje(
+            titulo="DESCALIFICACIÓN",
+            mensaje=f"{player_name} ha sido descalificado\npor acumular 5 faltas GAM-JEOM.\n\n Ganador: {winner}"
+        )
     
     def connect_websocket(self):
-        """⭐ Conecta al WebSocket del tablero para recibir actualizaciones en tiempo real"""
+        """Conecta al WebSocket del tablero para recibir actualizaciones en tiempo real"""
         if not WEBSOCKET_AVAILABLE:
             print("[MainScreentabc] ✗ WebSocket no disponible")
             return
@@ -887,10 +1058,9 @@ class MainScreentabc(Screen):
                     alumno_id = data.get('alumnoId')
                     new_count = data.get('count', 0)
                     
-                    # ⭐ VERIFICAR SI EL TIMER ESTÁ ACTIVO
+                    # VERIFICAR SI EL TIMER ESTÁ ACTIVO
                     if not self.is_timer_active():
                         print(f"[WebSocket] ⚠️ Timer NO activo - Eliminando punto de alumno {alumno_id}")
-                        # Eliminar el punto que acaba de llegar
                         self.revert_score(alumno_id)
                         return
                     
@@ -936,7 +1106,7 @@ class MainScreentabc(Screen):
         self.ws_thread.start()
     
     def revert_score(self, alumno_id):
-        """⭐ Revierte (elimina) el último punto de un alumno cuando el timer no está activo"""
+        """Revierte (elimina) el último punto de un alumno cuando el timer no está activo"""
         def work():
             try:
                 url = f"http://localhost:8080/apiPuntajes/puntaje/alumno/{alumno_id}/last"
@@ -1000,6 +1170,33 @@ class MainScreentabc(Screen):
                 
             except Exception as e:
                 print(f"[MainScreentabc] ✗ Error obteniendo puntajes iniciales: {e}")
+        
+        Thread(target=work, daemon=True).start()
+
+    def fetch_initial_gamjeom(self):
+        """Obtiene las faltas GAM-JEOM iniciales al conectarse"""
+        def work():
+            try:
+                if self.id_alumno_rojo and self.combate_id:
+                    url_rojo = f"http://localhost:8080/apiGamJeom/falta/alumno/{self.id_alumno_rojo}/combate/{self.combate_id}/count"
+                    response_rojo = requests.get(url_rojo, timeout=2)
+                    if response_rojo.status_code == 200:
+                        count_rojo = response_rojo.json().get('count', 0)
+                        self.com1_panel.update_gamjeom_count(count_rojo)
+                        print(f"[MainScreentabc] 🔴 GAM-JEOM inicial ROJO: {count_rojo}")
+                
+                if self.id_alumno_azul and self.combate_id:
+                    url_azul = f"http://localhost:8080/apiGamJeom/falta/alumno/{self.id_alumno_azul}/combate/{self.combate_id}/count"
+                    response_azul = requests.get(url_azul, timeout=2)
+                    if response_azul.status_code == 200:
+                        count_azul = response_azul.json().get('count', 0)
+                        self.com2_panel.update_gamjeom_count(count_azul)
+                        print(f"[MainScreentabc] 🔵 GAM-JEOM inicial AZUL: {count_azul}")
+                
+                print("[MainScreentabc] ✓ GAM-JEOM iniciales cargados\n")
+                
+            except Exception as e:
+                print(f"[MainScreentabc] ✗ Error obteniendo GAM-JEOM iniciales: {e}")
         
         Thread(target=work, daemon=True).start()
     
@@ -1071,7 +1268,7 @@ if __name__ == '__main__':
             
             def simulate_combat_creation(dt):
                 print("\n" + "=" * 60)
-                print("🧪 SIMULACIÓN DE COMBATE")
+                print("SIMULACIÓN DE COMBATE")
                 print("=" * 60)
                 
                 combate_data = {
@@ -1093,9 +1290,10 @@ if __name__ == '__main__':
                 )
                 
                 print("\n✅ TABLERO CONFIGURADO")
-                print("⚠️  IMPORTANTE: Debes presionar INICIAR para que cuenten los puntos")
-                print("📡 Los puntajes se actualizan en tiempo real via WebSocket")
-                print("🎮 Los botones +/- guardan directamente en la BD")
+                print("  IMPORTANTE: Debes presionar INICIAR para que cuenten los puntos")
+                print(" Los puntajes se actualizan en tiempo real via WebSocket")
+                print(" Los botones +/- guardan directamente en la BD")
+                print(" 5 faltas GAM-JEOM = DESCALIFICACIÓN")
                 print("=" * 60 + "\n")
             
             Clock.schedule_once(simulate_combat_creation, 2)
