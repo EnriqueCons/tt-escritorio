@@ -88,6 +88,7 @@ class ResponsiveDataDisplay(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         self.size_hint_y = None
+        self.height = dp(50)  # Altura fija
         self.spacing = 0
         
         # Contenedor con fondo y sombra
@@ -114,18 +115,19 @@ class ResponsiveDataDisplay(BoxLayout):
                 radius=[dp(12)]
             )
         
-        # Label para mostrar el texto
+        # Label para mostrar el texto - CENTRADO
         self.label = Label(
             text=self.text,
             font_size=ResponsiveHelper.get_font_size(18),
             color=(0.1, 0.4, 0.7, 1),
-            halign='left',
-            valign='middle',
-            size_hint_y=None,
-            padding=[dp(12), dp(8)],
-            bold=True,
-            text_size=(None, None)
+            halign='center',  # Centrado horizontal
+            valign='middle',   # Centrado vertical
+            size_hint=(1, 1),
+            bold=True
         )
+        
+        # Vincular text_size al tamaño del label para que el centrado funcione
+        self.label.bind(size=self._update_label_text_size)
         
         self.add_widget(self.label)
         self.bind(
@@ -136,6 +138,10 @@ class ResponsiveDataDisplay(BoxLayout):
         
         Window.bind(on_resize=self.on_window_resize)
     
+    def _update_label_text_size(self, instance, value):
+        """Actualiza el text_size del label para mantener el centrado"""
+        self.label.text_size = (instance.width, instance.height)
+    
     def _update_rect(self, instance, value):
         self.rect.pos = instance.pos
         self.rect.size = instance.size
@@ -143,16 +149,9 @@ class ResponsiveDataDisplay(BoxLayout):
         self.shadow.size = instance.size
         self.border.pos = instance.pos
         self.border.size = instance.size
-        
-        # Calcular altura mínima reducida
-        min_height = max(dp(45), self.label.texture_size[1] + dp(16))
-        self.height = min_height
     
     def _update_text(self, instance, value):
         self.label.text = value
-        self.label.texture_update()
-        min_height = max(dp(45), self.label.texture_size[1] + dp(16))
-        self.height = min_height
     
     def on_window_resize(self, instance, width, height):
         self.label.font_size = ResponsiveHelper.get_font_size(18)
@@ -217,7 +216,7 @@ class VerInfoScreen(Screen):
             # Verificar si hay sesión activa
             if not session.is_logged_in():
                 self.mostrar_mensaje("Error", "No hay sesión activa. Por favor inicia sesión.")
-                Clock.schedule_once(lambda dt: self.volver(None), 2)
+                Clock.schedule_once(lambda dt: setattr(self.manager, 'current', 'inicio_sesion'), 2)
                 return
             
             admin_id = session.get_admin_id()
@@ -388,10 +387,10 @@ class VerInfoScreen(Screen):
 
         # Botones responsive
         botones_layout = BoxLayout(
-            orientation='horizontal' if Window.width > 600 else 'vertical',
+            orientation='horizontal' if Window.width > 800 else 'vertical',
             spacing=dp(15),
             size_hint_y=None,
-            height=ResponsiveHelper.get_button_height() if Window.width > 600 else ResponsiveHelper.get_button_height() * 2 + dp(15)
+            height=ResponsiveHelper.get_button_height() if Window.width > 800 else ResponsiveHelper.get_button_height() * 2 + dp(15)
         )
 
         btn_actualizar = HoverButton(
@@ -505,11 +504,11 @@ if __name__ == '__main__':
         admin_id=1,
         admin_data={
             'idAdministrador': 1,
-            'nombreAdministrador': 'Admin',
-            'paternoAdministrador': 'Test',
-            'maternoAdministrador': 'Usuario',
-            'usuarioAdministrador': 'admin',
-            'correoAdministrador': 'admin@test.com'
+            'nombreAdministrador': 'Enrique Gabriel',
+            'paternoAdministrador': 'Contreras',
+            'maternoAdministrador': 'González',
+            'usuarioAdministrador': 'Sbn Enrique',
+            'correoAdministrador': 'enrique@gmail.com'
         }
     )
     

@@ -12,9 +12,12 @@ from kivy.metrics import dp, sp
 from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.utils import platform
+from threading import Thread
+from api_client import api
+from session_manager import session
 
 
-# ------------------ UTILIDADES RESPONSIVE (COPIADAS DE registro.py) ------------------
+# ------------------ UTILIDADES RESPONSIVE ------------------
 class ResponsiveHelper:
     @staticmethod
     def is_mobile():
@@ -29,13 +32,13 @@ class ResponsiveHelper:
         """Retorna el ancho del formulario según el tamaño de ventana"""
         width = Window.width
         if width < 600:
-            return 0.95  # 95% en pantallas muy pequeñas
+            return 0.95
         elif width < 900:
-            return 0.85  # 85% en pantallas pequeñas
+            return 0.85
         elif width < 1200:
-            return 0.7   # 70% en pantallas medianas
+            return 0.7
         else:
-            return 0.6   # 60% en pantallas grandes
+            return 0.6
     
     @staticmethod
     def get_font_size(base_size):
@@ -79,36 +82,31 @@ class ResponsiveHelper:
         return dp(50) if Window.width > 600 else dp(110)
 
 
-# ------------------ TEXT INPUT REDONDEADO RESPONSIVE Y AZUL ------------------
+# ------------------ TEXT INPUT REDONDEADO RESPONSIVE ------------------
 class RoundedTextInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Configuración mejorada y responsive
         self.background_normal = ""
         self.background_active = ""
-        self.background_color = (0, 0, 0, 0)  
+        self.background_color = (0, 0, 0, 0)
         self.multiline = False
         self.size_hint_y = None
-        self.height = dp(55)  
-        self.padding = [dp(15), dp(15), dp(15), dp(15)]  
-        self.font_size = ResponsiveHelper.get_font_size(18)  
-        self.color = (1, 1, 1, 1)  
-        self.hint_text_color = (0.9, 0.9, 0.9, 0.8)  
-        self.cursor_color = (1, 1, 1, 1) 
-        self.selection_color = (0.2, 0.6, 1, 0.5)  
-        self.bold = True  
+        self.height = dp(55)
+        self.padding = [dp(15), dp(15), dp(15), dp(15)]
+        self.font_size = ResponsiveHelper.get_font_size(18)
+        self.color = (1, 1, 1, 1)
+        self.hint_text_color = (0.9, 0.9, 0.9, 0.8)
+        self.cursor_color = (1, 1, 1, 1)
+        self.selection_color = (0.2, 0.6, 1, 0.5)
+        self.bold = True
 
-       
         with self.canvas.before:
-            Color(0.1, 0.4, 0.7, 0.9) # Azul principal
-
+            Color(0.1, 0.4, 0.7, 0.9)
             self.bg_rect = RoundedRectangle(
                 pos=self.pos,
                 size=self.size,
                 radius=[dp(12)]
             )
-
-            # Borde interior
             Color(1, 1, 1, 0.3)
             self.border_rect = RoundedRectangle(
                 pos=(self.pos[0]+dp(2), self.pos[1]+dp(2)),
@@ -131,10 +129,9 @@ class RoundedTextInput(TextInput):
 
     def on_focus(self, instance, value):
         if value:
-            # Estado activo
             self.canvas.before.clear()
             with self.canvas.before:
-                Color(0.2, 0.5, 0.9, 1) # Azul más claro al enfocar
+                Color(0.2, 0.5, 0.9, 1)
                 self.bg_rect = RoundedRectangle(
                     pos=self.pos,
                     size=self.size,
@@ -147,10 +144,9 @@ class RoundedTextInput(TextInput):
                     radius=[dp(10)]
                 )
         else:
-            # Estado normal
             self.canvas.before.clear()
             with self.canvas.before:
-                Color(0.1, 0.4, 0.7, 0.9) # Azul principal
+                Color(0.1, 0.4, 0.7, 0.9)
                 self.bg_rect = RoundedRectangle(
                     pos=self.pos,
                     size=self.size,
@@ -162,19 +158,18 @@ class RoundedTextInput(TextInput):
                     size=(self.size[0]-dp(4), self.size[1]-dp(4)),
                     radius=[dp(10)]
                 )
-            self._update_rects() # Asegura que la geometría se actualice al perder el foco
+            self._update_rects()
 
 
-# ------------------ BOTÓN HOVER RESPONSIVE Y AZUL ------------------
+# ------------------ BOTÓN HOVER RESPONSIVE ------------------
 class HoverButton(Button):
     def __init__(self, **kwargs):
-        # Extraer background_color (o usar default azul)
         bg_color = kwargs.pop('background_color', (0.1, 0.4, 0.7, 1))
         
         super().__init__(**kwargs)
         
         self.background_normal = ''
-        self.background_color = bg_color # Usar el color provisto o el default
+        self.background_color = bg_color
         self.color = (1, 1, 1, 1)
         self.size_hint_y = None
         self.height = dp(50)
@@ -198,12 +193,74 @@ class HoverButton(Button):
         self.height = dp(50)
 
 
-# ------------------ PANTALLA ACTUALIZAR DATOS RESPONSIVE ------------------
+# ------------------ PANTALLA ACTUALIZAR DATOS ------------------
 class ActualizarDatosScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.admin_data = None
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
+
+    def on_pre_enter(self):
+        """Se ejecuta antes de mostrar la pantalla"""
+        self.cargar_datos_actuales()
+
+    def cargar_datos_actuales(self):
+        """Carga los datos actuales del administrador"""
+        try:
+            # Verificar sesión
+            if not session.is_logged_in():
+                self.mostrar_mensaje("Error", "No hay sesión activa.")
+                Clock.schedule_once(lambda dt: setattr(self.manager, 'current', 'inicio_sesion'), 2)
+                return
+            
+            admin_id = session.get_admin_id()
+            print(f"[ActualizarDatosScreen] Cargando datos del admin ID: {admin_id}")
+            
+            # Obtener datos frescos del backend
+            self.admin_data = api.get_administrador_by_id(admin_id)
+            
+            # Actualizar campos con los datos
+            self.actualizar_campos_ui()
+            
+        except Exception as e:
+            print(f"[ActualizarDatosScreen] Error al cargar datos: {e}")
+            # Intentar usar datos en caché
+            cached_data = session.get_admin_data()
+            if cached_data:
+                self.admin_data = cached_data
+                self.actualizar_campos_ui()
+            else:
+                self.mostrar_mensaje("Error", f"No se pudieron cargar los datos: {str(e)}")
+
+    def set_admin_data(self, admin_data):
+        """Método para recibir datos desde otra pantalla"""
+        self.admin_data = admin_data
+        self.actualizar_campos_ui()
+
+    def actualizar_campos_ui(self):
+        """Actualiza los campos del formulario con los datos del administrador"""
+        if not self.admin_data:
+            return
+        
+        if hasattr(self, 'nombre_input'):
+            self.nombre_input.text = self.admin_data.get('nombreAdministrador', '')
+        
+        if hasattr(self, 'paterno_input'):
+            self.paterno_input.text = self.admin_data.get('paternoAdministrador', '')
+        
+        if hasattr(self, 'materno_input'):
+            self.materno_input.text = self.admin_data.get('maternoAdministrador', '')
+        
+        if hasattr(self, 'usuario_input'):
+            self.usuario_input.text = self.admin_data.get('usuarioAdministrador', '')
+        
+        if hasattr(self, 'correo_input'):
+            self.correo_input.text = self.admin_data.get('correoAdministrador', '')
+        
+        # La contraseña siempre empieza vacía
+        if hasattr(self, 'nueva_contraseña_input'):
+            self.nueva_contraseña_input.text = ''
 
     def build_ui(self):
         self.clear_widgets()
@@ -276,7 +333,7 @@ class ActualizarDatosScreen(Screen):
         form_container.add_widget(titulo)
 
         # Función para crear campos editables
-        def crear_campo_editable(texto, valor_actual):
+        def crear_campo_editable(texto, valor_actual='', is_password=False):
             campo_layout = BoxLayout(
                 orientation='vertical',
                 spacing=dp(5),
@@ -298,30 +355,47 @@ class ActualizarDatosScreen(Screen):
             input_field = RoundedTextInput(
                 text=valor_actual,
                 size_hint_y=None,
-                height=dp(55)
+                height=dp(55),
+                password=is_password
             )
             campo_layout.add_widget(input_field)
 
             return campo_layout, input_field
 
-        # Campos editables (con datos actuales del usuario)
+        # Campos editables
         campos_edicion = [
-            ('Nombre', 'Juan'),
-            ('Apellidos', 'Pérez'),
-            ('Usuario', 'juanito123'),
-            ('Correo', 'juan@example.com'),
-            ('Nueva Contraseña', '', True)
+            ('Nombre(s)', ''),
+            ('Apellido Paterno', ''),
+            ('Apellido Materno', ''),
+            ('Usuario', ''),
+            ('Correo Electrónico', ''),
+            ('Nueva Contraseña (opcional)', '', True)
         ]
 
         # Añadir campos al formulario
-        for texto, valor, *resto in campos_edicion:
-            is_password = resto[0] if resto else False
-            layout, input_field = crear_campo_editable(texto, valor)
-            if is_password:
-                input_field.password = True
+        for item in campos_edicion:
+            texto = item[0]
+            valor = item[1] if len(item) > 1 else ''
+            is_password = item[2] if len(item) > 2 else False
             
-            # Nombres de atributos en minúsculas y sin acentos para consistencia
-            attr_name = texto.lower().replace(" ", "_").replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u") + "_input"
+            layout, input_field = crear_campo_editable(texto, valor, is_password)
+            
+            # Nombres de atributos normalizados
+            if texto == 'Nombre(s)':
+                attr_name = 'nombre_input'
+            elif texto == 'Apellido Paterno':
+                attr_name = 'paterno_input'
+            elif texto == 'Apellido Materno':
+                attr_name = 'materno_input'
+            elif texto == 'Usuario':
+                attr_name = 'usuario_input'
+            elif texto == 'Correo Electrónico':
+                attr_name = 'correo_input'
+            elif texto.startswith('Nueva Contraseña'):
+                attr_name = 'nueva_contraseña_input'
+            else:
+                attr_name = texto.lower().replace(" ", "_").replace("(", "").replace(")", "") + "_input"
+            
             setattr(self, attr_name, input_field)
             form_container.add_widget(layout)
 
@@ -340,7 +414,7 @@ class ActualizarDatosScreen(Screen):
         # Botón Guardar Cambios
         btn_guardar = HoverButton(
             text='GUARDAR CAMBIOS',
-            background_color=(0.1, 0.4, 0.7, 1) # Azul principal
+            background_color=(0.1, 0.4, 0.7, 1)
         )
         btn_guardar.bind(on_press=self.guardar_cambios)
         botones_layout.add_widget(btn_guardar)
@@ -348,11 +422,10 @@ class ActualizarDatosScreen(Screen):
         # Botón Cancelar
         btn_cancelar = HoverButton(
             text='CANCELAR',
-            background_color=(0.7, 0.1, 0.1, 1) # Rojo
+            background_color=(0.7, 0.1, 0.1, 1)
         )
         btn_cancelar.bind(on_press=self.cancelar)
         
-        # Actualizar canvas del botón Cancelar para el color rojo
         btn_cancelar.canvas.before.clear()
         with btn_cancelar.canvas.before:
             Color(0.7, 0.1, 0.1, 1)
@@ -379,7 +452,6 @@ class ActualizarDatosScreen(Screen):
         self.background_rect.pos = instance.pos
         
     def on_window_resize(self, instance, width, height):
-        # Reconstruir la UI para aplicar cambios de tamaño y disposición
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
     def on_enter(self, *args):
@@ -390,54 +462,100 @@ class ActualizarDatosScreen(Screen):
             self.nombre_input.focus = True
 
     def guardar_cambios(self, instance):
-        """Validar y guardar los cambios realizados"""
+        """Validar y guardar los cambios en el backend"""
         # Validar campos obligatorios
-        # Nota: Los atributos ahora son en minúsculas y sin acentos (ej. self.apellidos_input)
-        campos_obligatorios = [
-            (self.nombre_input, "El nombre es obligatorio"),
-            (self.apellidos_input, "El Apellido es obligatorio"), # Se corrigió la tipografía en el nombre del atributo
-            (self.correo_input, "El correo es obligatorio")
-        ]
-
         errores = []
-        for campo, mensaje in campos_obligatorios:
-            if not campo.text.strip():
-                errores.append(mensaje)
-
+        
+        if not self.nombre_input.text.strip():
+            errores.append("El nombre es obligatorio")
+        
+        if not self.paterno_input.text.strip():
+            errores.append("El apellido paterno es obligatorio")
+        
+        if not self.usuario_input.text.strip():
+            errores.append("El usuario es obligatorio")
+        
+        if not self.correo_input.text.strip():
+            errores.append("El correo es obligatorio")
+        
         # Validar formato de correo
-        if "@" not in self.correo_input.text or "." not in self.correo_input.text:
+        if self.correo_input.text.strip() and "@" not in self.correo_input.text:
             errores.append("El correo electrónico no es válido")
-
-        # Validar contraseña si se ingresó una nueva
-        if self.nueva_contraseña_input.text:
-            if len(self.nueva_contraseña_input.text) < 8:
-                errores.append("La contraseña debe tener al menos 8 caracteres")
-
+        
+        # Validar contraseña solo si se ingresó una nueva
+        nueva_pass = self.nueva_contraseña_input.text.strip()
+        if nueva_pass and len(nueva_pass) < 8:
+            errores.append("La contraseña debe tener al menos 8 caracteres")
+        
         if errores:
             self.mostrar_errores(errores)
             return
-
-        datos_actualizados = {
-            'nombre': self.nombre_input.text,
-            'apellidos': self.apellidos_input.text, # Corregido de Apellido_input a apellidos_input
-            'usuario': self.usuario_input.text,
-            'correo': self.correo_input.text,
-            'contraseña': self.nueva_contraseña_input.text if self.nueva_contraseña_input.text else None
+        
+        # Preparar datos para actualizar
+        payload = {
+            'nombreAdministrador': self.nombre_input.text.strip(),
+            'paternoAdministrador': self.paterno_input.text.strip(),
+            'maternoAdministrador': self.materno_input.text.strip(),
+            'usuarioAdministrador': self.usuario_input.text.strip(),
+            'correoAdministrador': self.correo_input.text.strip()
         }
-
-        # Simulación de guardado...
-        self.mostrar_mensaje("Éxito", "Tus datos se han actualizado correctamente")
         
-        # Limpiar campo de contraseña después de la actualización exitosa
-        self.nueva_contraseña_input.text = ""
+        # Solo incluir contraseña si se ingresó una nueva
+        if nueva_pass:
+            payload['contraseniaAdministrador'] = nueva_pass
         
-        self.manager.current = 'cuenta'
+        # Guardar en backend en un hilo separado
+        def _save_task():
+            try:
+                admin_id = session.get_admin_id()
+                print(f"[ActualizarDatosScreen] Actualizando admin ID: {admin_id}")
+                print(f"[ActualizarDatosScreen] Payload: {payload}")
+                
+                # Llamar al endpoint de actualización
+                updated_admin = api.update_administrador(admin_id, payload)
+                
+                # Actualizar sesión con los nuevos datos
+                session.update_admin_data(updated_admin)
+                
+                def _success(dt):
+                    self.mostrar_mensaje("Éxito", "Tus datos se han actualizado correctamente")
+                    # Limpiar campo de contraseña
+                    self.nueva_contraseña_input.text = ""
+                    # Volver a la pantalla de cuenta después de 1.5 segundos
+                    Clock.schedule_once(lambda dt: setattr(self.manager, 'current', 'cuenta'), 1.5)
+                
+                Clock.schedule_once(_success, 0)
+                
+            except Exception as e:
+                print(f"[ActualizarDatosScreen] Error al guardar: {e}")
+                error_msg = str(e)
+                
+                # Mensajes de error más amigables
+                if "ya está registrado" in error_msg.lower():
+                    error_msg = "El correo o usuario ya están en uso"
+                elif "404" in error_msg:
+                    error_msg = "No se encontró el administrador"
+                elif "401" in error_msg or "403" in error_msg:
+                    error_msg = "No tienes permisos para realizar esta acción"
+                else:
+                    error_msg = f"Error al actualizar: {error_msg}"
+                
+                def _error(dt):
+                    self.mostrar_mensaje("Error", error_msg)
+                
+                Clock.schedule_once(_error, 0)
+        
+        # Ejecutar en hilo separado
+        Thread(target=_save_task, daemon=True).start()
 
     def cancelar(self, instance):
+        # Limpiar campo de contraseña al cancelar
+        if hasattr(self, 'nueva_contraseña_input'):
+            self.nueva_contraseña_input.text = ""
         self.manager.current = 'cuenta'
 
     def mostrar_errores(self, errores):
-        """Mostrar popup de errores con estilo azul consistente"""
+        """Mostrar popup de errores"""
         scroll_content = ScrollView(size_hint=(1, 1))
         lista_campos = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20), size_hint_y=None)
         lista_campos.bind(minimum_height=lista_campos.setter('height'))
@@ -445,7 +563,7 @@ class ActualizarDatosScreen(Screen):
         titulo_label = Label(
             text='Errores de Validación:',
             font_size=ResponsiveHelper.get_font_size(20),
-            color=(0.5, 0.8, 1, 1), # Azul claro
+            color=(0.5, 0.8, 1, 1),
             bold=True,
             size_hint_y=None,
             height=dp(40)
@@ -471,17 +589,18 @@ class ActualizarDatosScreen(Screen):
             size_hint_y=None,
             height=dp(50),
             background_normal='',
-            background_color=(0.2, 0.6, 1, 1), # Azul para el botón
+            background_color=(0.2, 0.6, 1, 1),
             color=(1, 1, 1, 1),
             bold=True,
-            font_size=ResponsiveHelper.get_font_size(18))
+            font_size=ResponsiveHelper.get_font_size(18)
+        )
         lista_campos.add_widget(btn_cerrar)
         scroll_content.add_widget(lista_campos)
 
         popup_size = ResponsiveHelper.get_popup_size()
         popup = Popup(
             title='¡Atención!',
-            title_color=(1, 1, 1, 1), # Color del título blanco
+            title_color=(1, 1, 1, 1),
             title_size=ResponsiveHelper.get_font_size(22),
             title_align='center',
             content=scroll_content,
@@ -493,7 +612,7 @@ class ActualizarDatosScreen(Screen):
         btn_cerrar.bind(on_press=popup.dismiss)
 
         with popup.canvas.before:
-            Color(0.1, 0.4, 0.7, 1) # Azul de fondo del popup
+            Color(0.1, 0.4, 0.7, 1)
             popup.rect = RoundedRectangle(
                 pos=popup.pos,
                 size=popup.size,
@@ -508,17 +627,18 @@ class ActualizarDatosScreen(Screen):
         popup.open()
 
     def mostrar_mensaje(self, titulo, mensaje):
-        """Mostrar popup de mensaje con estilo azul consistente"""
+        """Mostrar popup de mensaje"""
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
 
         mensaje_label = Label(
             text=mensaje,
             font_size=ResponsiveHelper.get_font_size(18),
-            color=(0.5, 0.8, 1, 1), # Azul claro
+            color=(0.5, 0.8, 1, 1),
             halign='center',
             valign='middle',
             size_hint_y=None,
-            height=dp(80))
+            height=dp(80)
+        )
         mensaje_label.bind(size=mensaje_label.setter('text_size'))
         content.add_widget(mensaje_label)
 
@@ -527,15 +647,16 @@ class ActualizarDatosScreen(Screen):
             size_hint_y=None,
             height=dp(50),
             background_normal='',
-            background_color=(0.2, 0.6, 1, 1), # Azul para el botón
+            background_color=(0.2, 0.6, 1, 1),
             color=(1, 1, 1, 1),
             bold=True,
-            font_size=ResponsiveHelper.get_font_size(18))
+            font_size=ResponsiveHelper.get_font_size(18)
+        )
 
         popup_size = ResponsiveHelper.get_popup_size()
         popup = Popup(
             title=titulo,
-            title_color=(1, 1, 1, 1), # Color del título blanco
+            title_color=(1, 1, 1, 1),
             title_size=ResponsiveHelper.get_font_size(22),
             title_align='center',
             content=content,
@@ -548,7 +669,7 @@ class ActualizarDatosScreen(Screen):
         content.add_widget(btn_aceptar)
 
         with popup.canvas.before:
-            Color(0.1, 0.4, 0.7, 1) # Azul de fondo del popup
+            Color(0.1, 0.4, 0.7, 1)
             popup.rect = RoundedRectangle(
                 pos=popup.pos,
                 size=popup.size,
@@ -561,3 +682,30 @@ class ActualizarDatosScreen(Screen):
 
         popup.bind(pos=update_popup_rect, size=update_popup_rect)
         popup.open()
+
+
+# ------------------ APP DE PRUEBA ------------------
+if __name__ == '__main__':
+    from kivy.app import App
+    from kivy.uix.screenmanager import ScreenManager
+    
+    # Para pruebas, establecer una sesión ficticia
+    session.set_session(
+        admin_id=1,
+        admin_data={
+            'idAdministrador': 1,
+            'nombreAdministrador': 'Admin',
+            'paternoAdministrador': 'Test',
+            'maternoAdministrador': 'Usuario',
+            'usuarioAdministrador': 'admin',
+            'correoAdministrador': 'admin@test.com'
+        }
+    )
+    
+    class TestApp(App):
+        def build(self):
+            sm = ScreenManager()
+            sm.add_widget(ActualizarDatosScreen(name='actualizar'))
+            return sm
+    
+    TestApp().run()
