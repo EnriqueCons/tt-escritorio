@@ -13,7 +13,25 @@ from kivy.metrics import dp, sp
 from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.utils import platform
+import requests, json
+from threading import Thread
 
+API_BASE_URL = "http://localhost:8080"
+
+class ApiClient:
+    def __init__(self, base_url):
+        self.base_url = base_url.strip("/")
+        self.session = requests.Session()
+
+    def post_json(self, path, payload):
+        url = f"{self.base_url}{path}"
+        return self.session.post(
+            url,
+            data=json.dumps(payload),
+            headers={"Content-Type":"application/json","Accept":"application/json"},
+            timeout=10
+        )
+api = ApiClient(API_BASE_URL)
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
 class ResponsiveHelper:
@@ -204,6 +222,7 @@ class HoverButton(Button):
 class RegistroScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.loading_popup = None
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
 
@@ -454,6 +473,35 @@ class RegistroScreen(Screen):
         content.add_widget(btn_aceptar)
         popup.open()
 
+    def show_loading(self, text="Creando cuenta..."):
+        if self.loading_popup:
+            return
+        box = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20))
+        box.add_widget(Label(text=text, color=(1,1,1,1),
+                             font_size=ResponsiveHelper.get_font_size(18)))
+        self.loading_popup = Popup(title='',
+                                   content=box,
+                                   size_hint=(None,None),
+                                   size=(dp(220), dp(120)),
+                                   separator_height=0,
+                                   background='')
+        with self.loading_popup.canvas.before:
+            Color(0,0,0,0.6)
+            self.loading_rect = RoundedRectangle(pos=self.loading_popup.pos,
+                                                 size=self.loading_popup.size,
+                                                 radius=[dp(12)])
+            
+        def _upd(inst, val):
+            self.loading_rect.pos = inst.pos
+            self.loading_rect.size = inst.size
+            self.loading_popup.bind(pos=_upd, size=_upd)
+            self.loading_popup.open()
+
+    def hide_loading(self):
+        if self.loading_popup:
+            self.loading_popup.dismiss()
+            self.loading_popup = None
+
     def mostrar_popup_campos_faltantes_registro(self, campos_faltantes):
         scroll_content = ScrollView(size_hint=(1, 1))
         lista_campos = BoxLayout(
@@ -540,22 +588,16 @@ class RegistroScreen(Screen):
             (self.contraseña_input, "Por favor ingresa una contraseña")
         ]
 
-        campos_faltantes = []
-        for campo, mensaje in required_fields:
-            if not campo.text.strip():
-                campos_faltantes.append(mensaje)
-
+        campos_faltantes = [msg for campo, msg in required_fields if not campo.text.strip()]
         if campos_faltantes:
             self.mostrar_popup_campos_faltantes_registro(campos_faltantes)
             return
 
-        # Validar formato de correo electrónico
         if "@" not in self.correo_input.text or "." not in self.correo_input.text:
             self.mostrar_mensaje("Correo inválido", "Por favor ingresa un correo electrónico válido")
             self.correo_input.focus = True
             return
 
-        # Validar contraseñas coincidentes
         if self.contraseña_input.text != self.confirmar_contraseña_input.text:
             self.mostrar_mensaje("Error en contraseña", "Las contraseñas no coinciden")
             self.contraseña_input.text = ""
@@ -563,7 +605,6 @@ class RegistroScreen(Screen):
             self.contraseña_input.focus = True
             return
 
-        # Validar longitud mínima de contraseña
         if len(self.contraseña_input.text) < 8:
             self.mostrar_mensaje("Contraseña débil", "La contraseña debe tener al menos 8 caracteres")
             self.contraseña_input.text = ""
@@ -571,15 +612,68 @@ class RegistroScreen(Screen):
             self.contraseña_input.focus = True
             return
 
-        self.mostrar_mensaje(
-            "¡Registro exitoso!",
-            f"Bienvenido {self.nombre_input.text} {self.apellidos_input.text}\nTu cuenta ha sido creada con éxito"
-        )
+        # Mapear "Apellidos" en paterno/materno (si luego los separas, quita esta lógica)
+        apellidos = self.apellidos_input.text.strip()
+        partes = apellidos.split(" ", 1)
+        paterno = partes[0]
+        materno = partes[1] if len(partes) > 1 else ""
 
-        # Limpiar campos
-        for campo in [self.nombre_input, self.apellidos_input, self.usuario_input,
-                      self.correo_input, self.contraseña_input, self.confirmar_contraseña_input]:
-            campo.text = ""
+        payload = {
+            "nombreAdministrador": self.nombre_input.text.strip(),
+            "paternoAdministrador": paterno,
+            "maternoAdministrador": materno,
+            "usuarioAdministrador": self.usuario_input.text.strip(),
+            "correoAdministrador": self.correo_input.text.strip(),
+            "contraseniaAdministrador": self.contraseña_input.text
+        }
+
+        def _task():
+            try:
+                resp = api.post_json("/apiAdministradores/administrador", payload)
+                if resp.status_code in (200, 201):
+                    # Éxito
+                    def _ok(dt):
+                        self.hide_loading()
+                        self.manager.current = 'main'
+                        self.mostrar_mensaje(
+                            "¡Registro exitoso!",
+                            f"Bienvenido {self.nombre_input.text} {self.apellidos_input.text}"
+                        )
+                        # Limpiar campos
+                        for campo in [self.nombre_input, self.apellidos_input, self.usuario_input,
+                                    self.correo_input, self.contraseña_input, self.confirmar_contraseña_input]:
+                            campo.text = ""
+                        # (Opcional) Navegar a login si lo deseas
+                        # self.manager.current = 'login'
+                    Clock.schedule_once(_ok, 0)
+                else:
+                    try:
+                        msg = resp.json().get("message", f"Error {resp.status_code}")
+                    except Exception:
+                        msg = f"Error {resp.status_code}"
+                    def _err(dt):
+                        self.hide_loading()
+                        self.mostrar_mensaje("Error", msg)
+                    Clock.schedule_once(_err, 0)
+
+            except requests.exceptions.ConnectionError:
+                def _net(dt):
+                    self.hide_loading()
+                    self.mostrar_mensaje("Error", "No se pudo conectar con el servidor.")
+                Clock.schedule_once(_net, 0)
+            except requests.exceptions.Timeout:
+                def _to(dt):
+                    self.hide_loading()
+                    self.mostrar_mensaje("Error", "Tiempo de espera agotado.")
+                Clock.schedule_once(_to, 0)
+            except Exception as e:
+                def _ex(dt):
+                    self.hide_loading()
+                    self.mostrar_mensaje("Error", f"Ocurrió un error: {str(e)}")
+                Clock.schedule_once(_ex, 0)
+
+        self.show_loading("Creando cuenta...")
+        Thread(target=_task, daemon=True).start()
 
     def volver(self, instance):
         self.manager.current = 'main'

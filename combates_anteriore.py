@@ -14,6 +14,8 @@ from kivy.uix.textinput import TextInput
 from kivy.utils import platform
 from kivy.clock import Clock
 from kivy.animation import Animation
+from api_client import api
+from threading import Thread
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -95,7 +97,6 @@ class LightBlueButton(Button):
         self.font_size = ResponsiveHelper.get_font_size(16)
 
     def on_button_press(self, instance):
-        # Animación al presionar: reducir ligeramente el tamaño
         anim = Animation(
             size=(self.width * 0.95, self.height * 0.95),
             duration=0.1
@@ -103,7 +104,6 @@ class LightBlueButton(Button):
         anim.start(self)
 
     def on_button_release(self, instance):
-        # Animación al soltar: volver al tamaño original
         anim = Animation(
             size=(self.width / 0.95, self.height / 0.95),
             duration=0.1
@@ -166,7 +166,7 @@ class SuccessPopup(Popup):
 class PasswordInputPopup(Popup):
     def __init__(self, on_verify, **kwargs):
         super().__init__(**kwargs)
-        self.title = 'Ingresar Contraseña'
+        self.title = 'Verificación de Administrador'
         self.title_color = (1, 1, 1, 1)
         self.title_size = ResponsiveHelper.get_font_size(22)
         self.title_align = 'center'
@@ -179,13 +179,22 @@ class PasswordInputPopup(Popup):
 
         content = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(25))
         
+        info_label = Label(
+            text='Ingrese su contraseña de administrador',
+            font_size=ResponsiveHelper.get_font_size(16),
+            color=(0.5, 0.8, 1, 1),
+            size_hint_y=None,
+            height=dp(30)
+        )
+        content.add_widget(info_label)
+        
         self.password_input = TextInput(
             password=True,
             multiline=False,
             font_size=ResponsiveHelper.get_font_size(18),
             size_hint_y=None,
             height=dp(50),
-            hint_text='Ingrese su contraseña',
+            hint_text='Contraseña de administrador',
             padding=[dp(15), dp(12)]
         )
         content.add_widget(self.password_input)
@@ -233,17 +242,31 @@ class PasswordInputPopup(Popup):
         )
 
     def verify_password(self, instance):
-        if self.password_input.text == "petotech123":
+        """Verifica la contraseña del administrador contra la API"""
+        password = self.password_input.text.strip()
+        
+        if not password:
+            self.password_input.hint_text = 'Debe ingresar una contraseña'
+            self.password_input.hint_text_color = (1, 0, 0, 1)
+            return
+        
+        # Usar la contraseña almacenada en el login
+        from kivy.app import App
+        app = App.get_running_app()
+        
+        # Obtener la contraseña del usuario logueado (si está almacenada)
+        stored_password = getattr(app, 'admin_password', None)
+        
+        if stored_password and password == stored_password:
             self.on_verify(True)
             self.dismiss()
         else:
             self.password_input.text = ''
-            self.password_input.hint_text = 'Contraseña incorrecta, intente de nuevo'
+            self.password_input.hint_text = 'Contraseña incorrecta'
             self.password_input.hint_text_color = (1, 0, 0, 1)
 
-
 class PasswordDisplayPopup(Popup):
-    def __init__(self, combate_numero, **kwargs):
+    def __init__(self, combate_numero, password, **kwargs):
         super().__init__(**kwargs)
         self.title = 'Contraseña del Combate'
         self.title_color = (1, 1, 1, 1)
@@ -255,8 +278,6 @@ class PasswordDisplayPopup(Popup):
         self.separator_height = 0
         self.auto_dismiss = True
 
-        self.combate_password = self._generate_password(combate_numero)
-
         content = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(25))
         
         message = Label(
@@ -264,18 +285,23 @@ class PasswordDisplayPopup(Popup):
             font_size=ResponsiveHelper.get_font_size(18),
             color=(0.5, 0.8, 1, 1),
             halign='center',
-            markup=True
+            markup=True,
+            size_hint_y=None,
+            height=dp(60)
         )
         content.add_widget(message)
         
         password_display = Label(
-            text=f'[b]{self.combate_password}[/b]',
+            text=f'[b]{password}[/b]', 
             font_size=ResponsiveHelper.get_font_size(26),
-            color=(1, 1, 1, 1),
+            color=(0.5, 0.8, 1, 1),
             halign='center',
-            markup=True
+            markup=True,
+            size_hint_y=None,
+            height=dp(50)
         )
         content.add_widget(password_display)
+
         
         btn_ok = Button(
             text='OK',
@@ -299,11 +325,6 @@ class PasswordDisplayPopup(Popup):
             pos=lambda instance, value: setattr(self.rect, 'pos', value),
             size=lambda instance, value: setattr(self.rect, 'size', value)
         )
-
-    def _generate_password(self, combate_numero):
-        import hashlib
-        hash_obj = hashlib.md5(str(combate_numero).encode())
-        return hash_obj.hexdigest()[:8].upper()
 
 
 class ConfirmDeleteCombatePopup(Popup):
@@ -405,7 +426,6 @@ class CombateCard(BoxLayout):
     def build_card(self):
         self.clear_widgets()
         
-        # Calcular altura según orientación de botones (más compacto)
         button_rows_height = dp(110) if Window.width > 600 else dp(220)
         self.height = dp(180) + button_rows_height
 
@@ -415,10 +435,9 @@ class CombateCard(BoxLayout):
             
             self.bind(pos=self.update_graphics, size=self.update_graphics)
 
-        # Título con badge del número de combate (más compacto)
+        # Header con badge
         header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(40), spacing=dp(10))
         
-        # Badge del número
         badge_label = Label(
             text=f'#{self.combate_data["numero"]}',
             font_size=ResponsiveHelper.get_font_size(18),
@@ -441,7 +460,7 @@ class CombateCard(BoxLayout):
             )
         
         header_box.add_widget(badge_label)
-        header_box.add_widget(BoxLayout())  # Spacer
+        header_box.add_widget(BoxLayout())
         
         self.add_widget(header_box)
 
@@ -464,7 +483,7 @@ class CombateCard(BoxLayout):
 
         self.add_widget(self.info_layout)
 
-        # Botones responsive sin iconos
+        # Botones
         if Window.width > 600:
             self.create_horizontal_buttons()
         else:
@@ -575,40 +594,126 @@ class CombateCard(BoxLayout):
         ).open()
 
     def open_edit_screen(self, instance):
+        """Abre la pantalla de edición con los datos del combate"""
         app = App.get_running_app()
-        if not app.root.has_screen('actualizar_combate'):
-            from actualizar_combate import ActualizarCombateScreen
-            app.root.add_widget(ActualizarCombateScreen(
-                name='actualizar_combate',
-                combate_data=self.combate_data,
-                on_save=self.on_edit_callback
-            ))
+        
+        # IMPORTANTE: Siempre remover la pantalla existente para crearla con nuevos datos
+        if app.root.has_screen('actualizar_combate'):
+            old_screen = app.root.get_screen('actualizar_combate')
+            app.root.remove_widget(old_screen)
+        
+        # Importar y crear nueva pantalla con los datos del combate
+        from actualizar_combate import ActualizarCombateScreen
+        
+        print(f"[CombateCard] Abriendo edición para combate: {self.combate_data}")
+        
+        new_screen = ActualizarCombateScreen(
+            name='actualizar_combate',
+            combate_data=self.combate_data,
+            on_save=self.on_edit_callback
+        )
+        
+        app.root.add_widget(new_screen)
         app.root.current = 'actualizar_combate'
 
     def open_password_flow(self, instance):
+        """Abre el flujo para verificar contraseña de admin y mostrar contraseña del combate"""
         PasswordInputPopup(
             on_verify=lambda success: self.show_combate_password() if success else None
         ).open()
 
     def show_combate_password(self):
-        PasswordDisplayPopup(combate_numero=self.combate_data['numero']).open()
+        """Muestra la contraseña del combate que ya tenemos en los datos"""
+        contrasena = self.combate_data.get('contrasenaCombate', 'No configurada')
+        
+        PasswordDisplayPopup(
+            combate_numero=self.combate_data['numero'],
+            password=contrasena
+        ).open()
+
+    def fetch_and_show_combate_password(self):
+        """Obtiene la contraseña del combate desde la API y la muestra"""
+        combate_id = self.combate_data.get('id')
+    
+        def _fetch():
+            try:
+                # Obtener datos completos del combate desde la API
+                combate_completo = api.get_combate_by_id(combate_id)
+                contrasena = combate_completo.get('contrasenaCombate', 'No configurada')
+                
+                Clock.schedule_once(
+                    lambda dt: PasswordDisplayPopup(
+                        combate_numero=self.combate_data['numero'],
+                        password=contrasena
+                    ).open()
+                )
+            except Exception as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_error_popup(f"Error al obtener contraseña: {str(e)}")
+                )
+        
+        thread = Thread(target=_fetch)
+        thread.daemon = True
+        thread.start()
+
+    def show_error_popup(self, message):
+        """Muestra un popup de error"""
+        content = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(25))
+    
+        lbl = Label(
+            text=message,
+            font_size=ResponsiveHelper.get_font_size(16),
+            color=(1, 0.3, 0.3, 1),
+            halign='center'
+        )
+        content.add_widget(lbl)
+        
+        btn = Button(
+            text='OK',
+            size_hint_y=None,
+            height=dp(50),
+            background_normal='',
+            background_color=(0.2, 0.6, 1, 1)
+        )
+        
+        popup = Popup(
+            title='Error',
+            content=content,
+            size_hint=(None, None),
+            size=ResponsiveHelper.get_popup_size()
+        )
+        
+        btn.bind(on_press=popup.dismiss)
+        content.add_widget(btn)
+        popup.open()
+
 
     def navigate_to_tablero(self, instance):
+        """Navega al tablero con todos los datos del combate"""
         app = App.get_running_app()
-        if not app.root.has_screen('tablero'):
-            from tablero import MainScreentab
-            app.root.add_widget(MainScreentab(name='tablero'))
         
-        tablero_screen = app.root.get_screen('tablero')
-        tablero_screen.com1_panel.name = self.combate_data.get('competidor1', 'COM1')
-        tablero_screen.com2_panel.name = self.combate_data.get('competidor2', 'COM2')
-        tablero_screen.com1_panel.nationality = self.combate_data.get('nacionalidad1', '')
-        tablero_screen.com2_panel.nationality = self.combate_data.get('nacionalidad2', '')
+        # Siempre recrear la pantalla para cargar datos frescos
+        if app.root.has_screen('tablero'):
+            old_screen = app.root.get_screen('tablero')
+            app.root.remove_widget(old_screen)
+        
+        from tablero import MainScreentab
+        tablero_screen = MainScreentab(name='tablero')
+        app.root.add_widget(tablero_screen)
+        
+        # Pasar todos los datos del combate al tablero
+        tablero_screen.set_combate_data(self.combate_data)
+        
+        print(f"[CombateCard] Navegando al tablero con datos: {self.combate_data}")
         
         app.root.current = 'tablero'
 
 
 class CombatesScreen(Screen):
+    """
+    Pantalla que muestra todos los combates de un torneo.
+    Conectada a la API REST para operaciones CRUD.
+    """
     torneo_nombre = StringProperty('')
     torneo_id = NumericProperty(None)
     
@@ -617,6 +722,7 @@ class CombatesScreen(Screen):
         self.combates = []
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
+        print(f"[CombatesScreen] Inicializado para torneo: {self.torneo_nombre} (ID: {self.torneo_id})")
 
     def build_ui(self):
         self.clear_widgets()
@@ -628,7 +734,7 @@ class CombatesScreen(Screen):
             self.rect = RoundedRectangle(pos=self.layout.pos, size=self.layout.size)
             self.layout.bind(pos=self.update_rect, size=self.update_rect)
 
-        # Header mejorado
+        # Header
         header = BoxLayout(size_hint_y=None, height=dp(90), padding=[dp(20), dp(15)])
         header_content = BoxLayout(orientation='vertical', spacing=dp(5))
         
@@ -656,7 +762,7 @@ class CombatesScreen(Screen):
         header.add_widget(header_content)
         self.layout.add_widget(header)
         
-        # ScrollView mejorado
+        # ScrollView
         scroll = ScrollView(
             size_hint=(1, 1),
             scroll_type=['bars', 'content'],
@@ -675,12 +781,10 @@ class CombatesScreen(Screen):
         )
         self.grid.bind(minimum_height=self.grid.setter('height'))
         
-        self.load_combates()
-        
         scroll.add_widget(self.grid)
         self.layout.add_widget(scroll)
 
-        # Footer mejorado
+        # Footer
         footer = BoxLayout(size_hint_y=None, height=dp(70), padding=[dp(30), dp(15), dp(30), dp(15)])
         btn_volver = Button(
             text="Volver",
@@ -704,6 +808,8 @@ class CombatesScreen(Screen):
         self.layout.add_widget(footer)
         
         self.add_widget(self.layout)
+        
+        self.load_combates()
 
     def update_rect(self, *args):
         self.rect.pos = self.layout.pos
@@ -711,50 +817,170 @@ class CombatesScreen(Screen):
 
     def on_window_resize(self, instance, width, height):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
+    
+    def on_enter(self):
+        """Se ejecuta cada vez que se entra a la pantalla"""
+        # Recargar combates para mostrar cambios
+        self.load_combates()
 
     def load_combates(self):
+        """Carga los combates desde la API"""
+        print("[CombatesScreen] Iniciando carga de combates...")
         self.grid.clear_widgets()
         
-        combates_data = [
-            {
-                "id": 1, "numero": 1, "fecha": "2024-01-15", "hora": "10:30",
-                "categoria": "Peso Medio Masculino Senior",
-                "competidor1": "Juan Pérez", "fecha_nac1": "15/05/1990",
-                "peso1": 70.5, "altura1": 175, "sexo1": "Masculino",
-                "nacionalidad1": "Mexicana", "peto_rojo": "ROJO123",
-                "competidor2": "Carlos Gómez", "fecha_nac2": "22/08/1992",
-                "peso2": 72.0, "altura2": 178, "sexo2": "Masculino",
-                "nacionalidad2": "Mexicana", "peto_azul": "AZUL456",
-                "area": "Área A", "Sede": "Tatami 1",
-                "categoria_peso": "-70kg", "num_rounds": 3,
-                "duracion_round": 3, "duracion_descanso": 1,
-                "arbitro_nombre": "Luis Martínez", "arbitro_Apellidos": "García",
-                "juez1_nombre": "Ana", "juez1_Apellidos": "Rodríguez",
-                "juez2_nombre": "Pedro", "juez2_Apellidos": "Sánchez",
-                "juez3_nombre": "María", "juez3_Apellidos": "López",
-                "torneo_id": self.torneo_id
-            },
-            {
-                "id": 2, "numero": 2, "fecha": "2024-01-15", "hora": "11:45",
-                "categoria": "Peso Pesado Femenino Junior",
-                "competidor1": "María López", "fecha_nac1": "10/03/1995",
-                "peso1": 68.0, "altura1": 170, "sexo1": "Femenino",
-                "nacionalidad1": "Mexicana", "peto_rojo": "ROJO456",
-                "competidor2": "Ana Martínez", "fecha_nac2": "05/07/1994",
-                "peso2": 67.5, "altura2": 169, "sexo2": "Femenino",
-                "nacionalidad2": "Mexicana", "peto_azul": "AZUL789",
-                "area": "Área B", "Sede": "Tatami 2",
-                "categoria_peso": "-68kg", "num_rounds": 5,
-                "duracion_round": 3, "duracion_descanso": 1,
-                "arbitro_nombre": "Jorge Hernández", "arbitro_Apellidos": "López",
-                "juez1_nombre": "Carlos", "juez1_Apellidos": "Gómez",
-                "juez2_nombre": "Luisa", "juez2_Apellidos": "Fernández",
-                "juez3_nombre": "Roberto", "juez3_Apellidos": "Díaz",
-                "torneo_id": self.torneo_id
-            }
-        ]
+        loading_label = Label(
+            text='Cargando combates...',
+            font_size=ResponsiveHelper.get_font_size(18),
+            color=(0.2, 0.6, 1, 1)
+        )
+        self.grid.add_widget(loading_label)
         
-        for combate in combates_data:
+        thread = Thread(target=self._fetch_combates)
+        thread.daemon = True
+        thread.start()
+
+    def _fetch_combates(self):
+        """Obtiene los combates de la API en segundo plano"""
+        print("[CombatesScreen] Fetching combates from API...")
+        try:
+            if self.torneo_id:
+                combates_data = api.get_combates_by_torneo(self.torneo_id)
+                print(f"[CombatesScreen] Recibidos {len(combates_data)} combates del torneo {self.torneo_id}")
+            else:
+                combates_data = api.get_all_combates()
+                print(f"[CombatesScreen] Recibidos {len(combates_data)} combates de la API")
+            
+            self.combates = [self._transform_combate(c) for c in combates_data]
+            print(f"[CombatesScreen] Combates transformados: {len(self.combates)}")
+            
+            Clock.schedule_once(lambda dt: self._display_combates())
+                
+        except RuntimeError as e:
+            print(f"[CombatesScreen] RuntimeError: {e}")
+            Clock.schedule_once(lambda dt: self._show_error(str(e)))
+        except Exception as e:
+            print(f"[CombatesScreen] Exception: {type(e).__name__}: {e}")
+            error_msg = "No se pudo conectar al servidor" if "Connection" in str(e) else f"Error: {str(e)}"
+            Clock.schedule_once(lambda dt: self._show_error(error_msg))
+
+    def _transform_combate(self, api_data):
+        """Transforma los datos de la API al formato que espera la UI"""
+        return {
+            "id": api_data.get("idCombate"),
+            "numero": api_data.get("idCombate"),
+            "fecha": self._format_date(api_data.get("horaCombate")),
+            "hora": self._format_time(api_data.get("horaCombate")),
+            "categoria": api_data.get("area", "Sin categoría"),
+            "contrasenaCombate":api_data.get("contrasenaCombate", "No configurada"),
+            
+            # Competidor Rojo (competidor2 en el tablero)
+            "competidor2": api_data.get("competidorRojo", {}).get("nombres", "No disponible"),
+            "fecha_nac2": self._format_date_simple(api_data.get("competidorRojo", {}).get("fechaNacimiento", "")),
+            "peso2": api_data.get("competidorRojo", {}).get("pesoKg", 0),
+            "sexo2": api_data.get("competidorRojo", {}).get("sexo", ""),
+            "nacionalidad2": "Mexicana",
+            "alumno_id_rojo": api_data.get("competidorRojo", {}).get("id", 0),  # ID para puntaje
+            
+            # Competidor Azul (competidor1 en el tablero)
+            "competidor1": api_data.get("competidorAzul", {}).get("nombres", "No disponible"),
+            "fecha_nac1": self._format_date_simple(api_data.get("competidorAzul", {}).get("fechaNacimiento", "")),
+            "peso1": api_data.get("competidorAzul", {}).get("pesoKg", 0),
+            "sexo1": api_data.get("competidorAzul", {}).get("sexo", ""),
+            "nacionalidad1": "Mexicana",
+            "alumno_id_azul": api_data.get("competidorAzul", {}).get("id", 0),  # ID para puntaje
+            
+            # Detalles del combate
+            "area": api_data.get("area", "Sin área"),
+            "num_rounds": api_data.get("numeroRound", 0),
+            "duracion_round": self._parse_duration(api_data.get("duracionRound")),
+            "duracion_descanso": self._parse_duration(api_data.get("duracionDescanso")),
+            "estado": api_data.get("estado", "PENDIENTE"),
+            
+            # Jueces
+            "arbitro_nombre": api_data.get("jueces", {}).get("arbitroCentral", {}).get("nombres", ""),
+            "arbitro_Apellidos": api_data.get("jueces", {}).get("arbitroCentral", {}).get("apellidos", ""),
+            "juez1_nombre": api_data.get("jueces", {}).get("juez1", {}).get("nombres", ""),
+            "juez1_Apellidos": api_data.get("jueces", {}).get("juez1", {}).get("apellidos", ""),
+            "juez2_nombre": api_data.get("jueces", {}).get("juez2", {}).get("nombres", ""),
+            "juez2_Apellidos": api_data.get("jueces", {}).get("juez2", {}).get("apellidos", ""),
+            "juez3_nombre": api_data.get("jueces", {}).get("juez3", {}).get("nombres", ""),
+            "juez3_Apellidos": api_data.get("jueces", {}).get("juez3", {}).get("apellidos", ""),
+            
+            "torneo_id": self.torneo_id
+        }
+
+    def _format_date(self, datetime_str):
+        """Formatea la fecha desde ISO 8601 a formato dd/mm/yyyy"""
+        if not datetime_str:
+            return "Sin fecha"
+        try:
+            from datetime import datetime
+            if 'T' in str(datetime_str):
+                dt = datetime.fromisoformat(str(datetime_str).replace('Z', '+00:00'))
+            else:
+                dt = datetime.strptime(str(datetime_str), "%Y-%m-%d")
+            return dt.strftime("%d/%m/%Y")
+        except:
+            return "Sin fecha"
+
+    def _format_date_simple(self, date_str):
+        """Formatea una fecha simple YYYY-MM-DD a DD/MM/YYYY"""
+        if not date_str:
+            return ""
+        try:
+            from datetime import datetime
+            if isinstance(date_str, str):
+                if 'T' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                return dt.strftime("%d/%m/%Y")
+            return str(date_str)
+        except:
+            return str(date_str)
+
+    def _format_time(self, datetime_str):
+        """Extrae la hora desde ISO 8601"""
+        if not datetime_str:
+            return "Sin hora"
+        try:
+            from datetime import datetime
+            if 'T' in str(datetime_str):
+                dt = datetime.fromisoformat(str(datetime_str).replace('Z', '+00:00'))
+                return dt.strftime("%H:%M")
+            return "Sin hora"
+        except:
+            return "Sin hora"
+
+    def _parse_duration(self, time_str):
+        """Convierte LocalTime (HH:mm:ss) a segundos"""
+        if not time_str:
+            return 0
+        try:
+            parts = str(time_str).split(':')
+            if len(parts) >= 2:
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2]) if len(parts) > 2 else 0
+                return hours * 3600 + minutes * 60 + seconds
+            return 0
+        except:
+            return 0
+
+    def _display_combates(self):
+        """Muestra los combates en la UI"""
+        self.grid.clear_widgets()
+        
+        if not self.combates:
+            no_data_label = Label(
+                text='No hay combates registrados',
+                font_size=ResponsiveHelper.get_font_size(18),
+                color=(0.5, 0.5, 0.5, 1)
+            )
+            self.grid.add_widget(no_data_label)
+            return
+        
+        for combate in self.combates:
             card = CombateCard(
                 combate_data=combate,
                 on_delete=self.delete_combate,
@@ -762,20 +988,84 @@ class CombatesScreen(Screen):
             )
             self.grid.add_widget(card)
 
+    def _show_error(self, message):
+        """Muestra un mensaje de error en la UI"""
+        self.grid.clear_widgets()
+        
+        error_box = BoxLayout(
+            orientation='vertical',
+            spacing=dp(15),
+            padding=dp(20),
+            size_hint_y=None,
+            height=dp(150)
+        )
+        
+        error_label = Label(
+            text=message,
+            font_size=ResponsiveHelper.get_font_size(16),
+            color=(1, 0, 0, 1),
+            halign='center',
+            valign='middle'
+        )
+        error_label.bind(size=error_label.setter('text_size'))
+        error_box.add_widget(error_label)
+        
+        retry_btn = Button(
+            text='Reintentar',
+            size_hint=(None, None),
+            size=(dp(200), dp(50)),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=(0.2, 0.6, 1, 1),
+            color=(1, 1, 1, 1),
+            bold=True,
+            font_size=ResponsiveHelper.get_font_size(16)
+        )
+        retry_btn.bind(on_press=lambda x: self.load_combates())
+        error_box.add_widget(retry_btn)
+        
+        self.grid.add_widget(error_box)
+
     def delete_combate(self, combate_data):
-        print(f"Eliminando combate #{combate_data['numero']} - ID: {combate_data['id']}")
+        """Elimina un combate mediante la API"""
+        combate_id = combate_data['id']
+        
+        def _do_delete():
+            try:
+                success = api.delete_combate(combate_id)
+                if success:
+                    Clock.schedule_once(lambda dt: self._on_delete_success(combate_data))
+                else:
+                    Clock.schedule_once(
+                        lambda dt: self.show_message("Error", "No se pudo eliminar el combate")
+                    )
+            except RuntimeError as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", str(e))
+                )
+            except Exception as e:
+                Clock.schedule_once(
+                    lambda dt: self.show_message("Error", f"Error al eliminar: {str(e)}")
+                )
+        
+        thread = Thread(target=_do_delete)
+        thread.daemon = True
+        thread.start()
+
+    def _on_delete_success(self, combate_data):
+        """Callback cuando se elimina exitosamente"""
         self.show_message("Éxito", f"Combate #{combate_data['numero']} eliminado correctamente")
         self.load_combates()
 
     def edit_combate(self, combate_original, nuevos_datos):
-        print(f"Actualizando combate #{combate_original['numero']} con:", nuevos_datos)
-        for key, value in nuevos_datos.items():
-            combate_original[key] = value
-        
-        self.show_message("Éxito", f"Combate #{combate_original['numero']} actualizado correctamente")
+        """Callback cuando se edita un combate - se llama después de guardar"""
+        print(f"[CombatesScreen] Combate editado: {combate_original['numero']}")
+        print(f"[CombatesScreen] Nuevos datos: {nuevos_datos}")
+        # Recargar la lista de combates
         self.load_combates()
 
     def show_message(self, title, message):
+        """Muestra un popup con un mensaje"""
         content = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(25))
         
         popup_size = ResponsiveHelper.get_popup_size()

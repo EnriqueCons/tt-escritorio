@@ -18,6 +18,8 @@ from kivy.properties import StringProperty, ObjectProperty
 from kivy.utils import platform
 from datetime import datetime, date
 import calendar
+from threading import Thread
+from api_client import api
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -351,6 +353,7 @@ class HoverButton(Button):
 class CrearTorneoScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._submitting = False
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
 
@@ -515,7 +518,7 @@ class CrearTorneoScreen(Screen):
     def on_window_resize(self, instance, width, height):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
-    def mostrar_mensaje(self, titulo, mensaje):
+    def mostrar_mensaje(self, titulo, mensaje, on_close=None):
         content = BoxLayout(
             orientation='vertical',
             spacing=dp(15),
@@ -571,9 +574,32 @@ class CrearTorneoScreen(Screen):
             instance.rect.size = instance.size
 
         popup.bind(pos=update_popup_rect, size=update_popup_rect)
-        btn_aceptar.bind(on_press=popup.dismiss)
+
+        def _close_and_callback(*_):
+            popup.dismiss()
+            if callable(on_close):
+                on_close()
+
+        btn_aceptar.bind(on_press=_close_and_callback)
         content.add_widget(btn_aceptar)
         popup.open()
+
+    # ---- helpers ----
+    def _dt_iso(self, fecha: date, hora) -> str:
+        """Fecha y hora"""
+        dt = datetime(year=fecha.year, month=fecha.month, day=fecha.day, hour=hora.hour, minute=hora.minute, second= 0 , microsecond= 0)
+
+        return dt.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    def _get_admin_id(self):
+        """Intenta extraer el id del admin desde app.auth."""
+        app = App.get_running_app()
+        if not hasattr(app, 'auth') or not app.auth:
+            return None
+        admin = app.auth.get('admin') or {}
+
+        return admin.get('idAdministrador') or admin.get('id') or admin.get('adminId')
+    
 
     def mostrar_popup_campos_faltantes(self, campos_faltantes):
         content = ScrollView()
@@ -652,42 +678,99 @@ class CrearTorneoScreen(Screen):
         popup.open()
 
     def crear_torneo(self, instance):
-        # Validar campos obligatorios
         required_fields = [
             (self.nombre_torneo_input, "Nombre del torneo"),
             (self.ubicacion_input, "Sede del torneo")
         ]
-
-        campos_faltantes = []
-        for campo, mensaje in required_fields:
-            if not campo.text.strip():
-                campos_faltantes.append(mensaje)
-
-        if campos_faltantes:
-            self.mostrar_popup_campos_faltantes(campos_faltantes)
+        faltantes = [msg for campo, msg in required_fields if not campo.text.strip()]
+        if faltantes:
+            self.mostrar_popup_campos_faltantes(faltantes)
             return
 
-        # Obtener fecha y horas seleccionadas
         fecha = self.date_selector.get_selected_date()
         hora_inicio = self.time_start_selector.get_selected_time()
         hora_termino = self.time_end_selector.get_selected_time()
 
-        # Validar que la hora de término sea posterior a la de inicio
         if hora_inicio >= hora_termino:
             self.mostrar_mensaje("Error", "La hora de término debe ser posterior a la de inicio")
             return
 
-        # Mostrar mensaje de éxito
-        self.mostrar_mensaje(
-            "¡Torneo creado!",
-            f"El torneo {self.nombre_torneo_input.text} ha sido creado con éxito\n"
-            f"Fecha: {fecha.strftime('%d/%m/%Y')}\n"
-            f"Hora: {hora_inicio.strftime('%H:%M')} - {hora_termino.strftime('%H:%M')}"
-        )
+  
+        fecha_hora_iso = self._dt_iso(fecha, hora_inicio)
+        admin_id = self._get_admin_id()
+        payload = {
+            "nombre": self.nombre_torneo_input.text.strip(),  
+            "fechaHora": fecha_hora_iso,
+            "sede": self.ubicacion_input.text.strip(),
+            "estado": "PROGRAMADO",  
+            "administrador": { "idAdministrador": admin_id }  
+        }
 
-        # Limpiar campos después de creación exitosa
-        self.nombre_torneo_input.text = ""
-        self.ubicacion_input.text = ""
+        if self._submitting:
+            return
+        self._submitting = True
+        instance.disabled = True
+        original_text = instance.text
+        instance.text = "Creando..."
+
+        def _task():
+            try:
+                resp = api.post_json("/apiTorneos/torneo", payload)
+                status = resp.status_code
+                if status in (200, 201):
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = None
+
+                    def _ok(dt):
+                        nombre = self.nombre_torneo_input.text.strip()
+                        self.mostrar_mensaje(
+                            "¡Torneo creado!",
+                            f"El torneo {self.nombre_torneo_input.text} ha sido creado con éxito\n"
+                            f"Fecha: {fecha.strftime('%d/%m/%Y')}  "
+                            f"Hora: {hora_inicio.strftime('%H:%M')} - {hora_termino.strftime('%H:%M')}"
+                        )
+                        # limpiar campos
+                        self.nombre_torneo_input.text = ""
+                        self.ubicacion_input.text = ""
+                        
+                        def go_home():
+                            App.get_running_app().root.current = 'ini'
+
+                        self.mostrar_mensaje(
+                            "¡Torneo creado!",
+                            f"El torneo {nombre} ha sido creado con éxito\n"
+                            f"Fecha: {fecha.strftime('%d/%m/%Y')}  "
+                            f"Hora: {hora_inicio.strftime('%H:%M')} - {hora_termino.strftime('%H:%M')}",
+                            on_close=go_home
+                        )
+                        
+                    Clock.schedule_once(_ok, 0)
+
+                else:
+                    try:
+                        err = resp.json().get("message", f"Error del servidor ({status})")
+                    except Exception:
+                        err = f"Error del servidor ({status})"
+                    Clock.schedule_once(lambda dt, m=err: self.mostrar_mensaje("Error", m), 0)
+            except Exception as e:
+                Clock.schedule_once(lambda dt, m=str(e): self.mostrar_mensaje("Error", f"No se pudo crear el torneo.\n{m}"), 0)
+            finally:
+                def _reset(dt):
+                    self._submitting = False
+                    instance.disabled = False
+                    instance.text = original_text
+                Clock.schedule_once(_reset, 0)
+
+        Thread(target=_task, daemon=True).start()
 
     def volver(self, instance):
         App.get_running_app().root.current = 'ini'
+
+    def update_background(self, instance, value):
+        self.background_rect.size = instance.size
+        self.background_rect.pos = instance.pos
+
+    def on_window_resize(self, instance, width, height):
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)

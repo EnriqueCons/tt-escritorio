@@ -12,6 +12,9 @@ from kivy.metrics import dp, sp
 from kivy.properties import StringProperty
 from kivy.utils import platform
 from kivy.clock import Clock
+from kivy.app import App
+from api_client import api
+from session_manager import session
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -85,6 +88,7 @@ class ResponsiveDataDisplay(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         self.size_hint_y = None
+        self.height = dp(50)  # Altura fija
         self.spacing = 0
         
         # Contenedor con fondo y sombra
@@ -111,18 +115,19 @@ class ResponsiveDataDisplay(BoxLayout):
                 radius=[dp(12)]
             )
         
-        # Label para mostrar el texto
+        # Label para mostrar el texto - CENTRADO
         self.label = Label(
             text=self.text,
             font_size=ResponsiveHelper.get_font_size(18),
             color=(0.1, 0.4, 0.7, 1),
-            halign='left',
-            valign='middle',
-            size_hint_y=None,
-            padding=[dp(12), dp(8)],
-            bold=True,
-            text_size=(None, None)
+            halign='center',  # Centrado horizontal
+            valign='middle',   # Centrado vertical
+            size_hint=(1, 1),
+            bold=True
         )
+        
+        # Vincular text_size al tamaño del label para que el centrado funcione
+        self.label.bind(size=self._update_label_text_size)
         
         self.add_widget(self.label)
         self.bind(
@@ -133,6 +138,10 @@ class ResponsiveDataDisplay(BoxLayout):
         
         Window.bind(on_resize=self.on_window_resize)
     
+    def _update_label_text_size(self, instance, value):
+        """Actualiza el text_size del label para mantener el centrado"""
+        self.label.text_size = (instance.width, instance.height)
+    
     def _update_rect(self, instance, value):
         self.rect.pos = instance.pos
         self.rect.size = instance.size
@@ -140,16 +149,9 @@ class ResponsiveDataDisplay(BoxLayout):
         self.shadow.size = instance.size
         self.border.pos = instance.pos
         self.border.size = instance.size
-        
-        # Calcular altura mínima reducida
-        min_height = max(dp(45), self.label.texture_size[1] + dp(16))
-        self.height = min_height
     
     def _update_text(self, instance, value):
         self.label.text = value
-        self.label.texture_update()
-        min_height = max(dp(45), self.label.texture_size[1] + dp(16))
-        self.height = min_height
     
     def on_window_resize(self, instance, width, height):
         self.label.font_size = ResponsiveHelper.get_font_size(18)
@@ -193,8 +195,78 @@ class HoverButton(Button):
 class VerInfoScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.admin_data = None
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
+
+    def on_pre_enter(self):
+        """Se ejecuta antes de mostrar la pantalla"""
+        self.cargar_datos_administrador()
+
+    def cargar_datos_administrador(self):
+        """Carga los datos del administrador desde el backend"""
+        try:
+            # Primero intentar obtener de la app
+            app = App.get_running_app()
+            
+            # Si no hay sesión en SessionManager, intentar recuperarla de app.auth
+            if not session.is_logged_in() and hasattr(app, 'auth') and app.auth:
+                session.set_session_from_app(app)
+            
+            # Verificar si hay sesión activa
+            if not session.is_logged_in():
+                self.mostrar_mensaje("Error", "No hay sesión activa. Por favor inicia sesión.")
+                Clock.schedule_once(lambda dt: setattr(self.manager, 'current', 'inicio_sesion'), 2)
+                return
+            
+            admin_id = session.get_admin_id()
+            print(f"[VerInfoScreen] Cargando datos del administrador ID: {admin_id}")
+            
+            # Obtener datos actualizados del administrador desde la API
+            self.admin_data = api.get_administrador_by_id(admin_id)
+            
+            # Actualizar la sesión con los datos más recientes
+            session.update_admin_data(self.admin_data)
+            
+            # Actualizar la interfaz con los datos
+            self.actualizar_campos_ui()
+            
+            print(f"[VerInfoScreen] Datos cargados exitosamente")
+            
+        except Exception as e:
+            print(f"[VerInfoScreen] Error al cargar datos: {e}")
+            self.mostrar_mensaje("Error", f"No se pudieron cargar los datos: {str(e)}")
+            # Si hay error, mostrar datos en caché de la sesión
+            self.mostrar_datos_cache()
+
+    def mostrar_datos_cache(self):
+        """Muestra los datos en caché de la sesión si hay error al cargar del backend"""
+        cached_data = session.get_admin_data()
+        if cached_data:
+            self.admin_data = cached_data
+            self.actualizar_campos_ui()
+            print("[VerInfoScreen] Mostrando datos en caché")
+
+    def actualizar_campos_ui(self):
+        """Actualiza los campos de la interfaz con los datos del administrador"""
+        if not self.admin_data:
+            return
+        
+        # Actualizar cada campo
+        if hasattr(self, 'nombres_display'):
+            self.nombres_display.text = self.admin_data.get('nombreAdministrador', 'N/A')
+        
+        if hasattr(self, 'apellidos_display'):
+            paterno = self.admin_data.get('paternoAdministrador', '')
+            materno = self.admin_data.get('maternoAdministrador', '')
+            apellidos = f"{paterno} {materno}".strip()
+            self.apellidos_display.text = apellidos if apellidos else 'N/A'
+        
+        if hasattr(self, 'usuario_display'):
+            self.usuario_display.text = self.admin_data.get('usuarioAdministrador', 'N/A')
+        
+        if hasattr(self, 'correo_display'):
+            self.correo_display.text = self.admin_data.get('correoAdministrador', 'N/A')
 
     def build_ui(self):
         self.clear_widgets()
@@ -269,7 +341,7 @@ class VerInfoScreen(Screen):
         form_container.add_widget(Widget(size_hint_y=None, height=dp(5)))
 
         # Función para crear campos
-        def crear_campo(etiqueta, valor, icon=""):
+        def crear_campo(etiqueta, valor_inicial="Cargando..."):
             campo_layout = BoxLayout(
                 orientation='vertical',
                 spacing=dp(4),
@@ -277,7 +349,7 @@ class VerInfoScreen(Screen):
             )
             campo_layout.bind(minimum_height=campo_layout.setter('height'))
 
-            # Etiqueta del campo sin icono
+            # Etiqueta del campo
             lbl_etiqueta = Label(
                 text=etiqueta,
                 font_size=ResponsiveHelper.get_font_size(18),
@@ -291,21 +363,21 @@ class VerInfoScreen(Screen):
             campo_layout.add_widget(lbl_etiqueta)
 
             # Display de datos responsivo
-            data_display = ResponsiveDataDisplay(text=valor)
+            data_display = ResponsiveDataDisplay(text=valor_inicial)
             campo_layout.add_widget(data_display)
             
             return campo_layout, data_display
 
-        # Campos de información sin iconos
+        # Campos de información
         campos_info = [
-            ('Nombre(s)', 'Karla', ''),
-            ('Apellidos', 'Cid Martínez', ''),
-            ('Usuario', 'kcidm', ''),
-            ('Correo', 'karla@example.com', '')
+            ('Nombre(s)', 'Cargando...'),
+            ('Apellidos', 'Cargando...'),
+            ('Usuario', 'Cargando...'),
+            ('Correo', 'Cargando...')
         ]
 
-        for etiqueta, valor, icon in campos_info:
-            layout, display = crear_campo(etiqueta, valor, icon)
+        for etiqueta, valor_inicial in campos_info:
+            layout, display = crear_campo(etiqueta, valor_inicial)
             attr_name = etiqueta.lower().replace("(", "").replace(")", "").replace(" ", "_") + "_display"
             setattr(self, attr_name, display)
             form_container.add_widget(layout)
@@ -315,10 +387,10 @@ class VerInfoScreen(Screen):
 
         # Botones responsive
         botones_layout = BoxLayout(
-            orientation='horizontal' if Window.width > 600 else 'vertical',
+            orientation='horizontal' if Window.width > 800 else 'vertical',
             spacing=dp(15),
             size_hint_y=None,
-            height=ResponsiveHelper.get_button_height() if Window.width > 600 else ResponsiveHelper.get_button_height() * 2 + dp(15)
+            height=ResponsiveHelper.get_button_height() if Window.width > 800 else ResponsiveHelper.get_button_height() * 2 + dp(15)
         )
 
         btn_actualizar = HoverButton(
@@ -349,6 +421,13 @@ class VerInfoScreen(Screen):
         Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
 
     def actualizar_datos(self, instance):
+        """Navega a la pantalla de actualización"""
+        # Pasar los datos actuales a la pantalla de actualización
+        if self.manager.has_screen('actualizar'):
+            actualizar_screen = self.manager.get_screen('actualizar')
+            if hasattr(actualizar_screen, 'set_admin_data'):
+                actualizar_screen.set_admin_data(self.admin_data)
+        
         self.manager.current = 'actualizar'
     
     def volver(self, instance):
@@ -419,6 +498,19 @@ class VerInfoScreen(Screen):
 if __name__ == '__main__':
     from kivy.app import App
     from kivy.uix.screenmanager import ScreenManager
+    
+    # Para pruebas, establecer una sesión ficticia
+    session.set_session(
+        admin_id=1,
+        admin_data={
+            'idAdministrador': 1,
+            'nombreAdministrador': 'Enrique Gabriel',
+            'paternoAdministrador': 'Contreras',
+            'maternoAdministrador': 'González',
+            'usuarioAdministrador': 'Sbn Enrique',
+            'correoAdministrador': 'enrique@gmail.com'
+        }
+    )
     
     class TestApp(App):
         def build(self):

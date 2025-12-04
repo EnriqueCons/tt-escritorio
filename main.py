@@ -1,3 +1,18 @@
+from kivy.config import Config
+
+Config.set('graphics', 'width', '1600')
+Config.set('graphics', 'height', '900')
+Config.set('graphics', 'resizable', True)
+Config.set('graphics', 'minimum_width', '1200')
+Config.set('graphics', 'minimum_height', '700')
+
+# Posicionar ventana (opcional)
+Config.set('graphics', 'position', 'auto')
+
+# NO escribir archivo config (evita conflictos)
+Config.set('kivy', 'exit_on_escape', '1')
+
+
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
@@ -29,7 +44,7 @@ from ini_juez import InicioSesionJuezScreen
 from cuenta import VerInfoScreen
 from actualizar_torneos import ActualizarTorneoScreen
 from actualizar import ActualizarDatosScreen
-
+from api_client import api
 
 # ------------------ UTILIDADES MULTIPLATAFORMA ------------------
 class ResponsiveHelper:
@@ -59,23 +74,42 @@ class ResponsiveHelper:
             return 0.25  # 25% en móviles o ventanas pequeñas
         elif width < 1200:
             return 0.22  # 22% en ventanas medianas
+        elif width < 1600:
+            return 0.20  # 20% en ventanas grandes
         else:
-            return 0.18  # 18% en ventanas grandes
+            return 0.18  # 18% en ventanas muy grandes
     
     @staticmethod
     def get_font_size(base_size):
         """Ajusta el tamaño de fuente según la resolución"""
         width = Window.width
+        height = Window.height
+        min_dimension = min(width, height)
+        
+        # ⭐ MEJORADO: Escala mejor para pantallas grandes
         if ResponsiveHelper.is_mobile() or width < 800:
             return sp(base_size * 0.75)
         elif width < 1200:
-            return sp(base_size * 0.85)
-        return sp(base_size)
+            return sp(base_size * 0.90)
+        elif width < 1600:
+            return sp(base_size * 1.0)   # Tamaño normal
+        elif width < 1920:
+            return sp(base_size * 1.15)  
+        else:
+            return sp(base_size * 1.3)  
     
     @staticmethod
     def get_spacing():
         """Retorna espaciado apropiado"""
-        return dp(10)
+        width = Window.width
+        if width < 800:
+            return dp(8)
+        elif width < 1200:
+            return dp(10)
+        elif width < 1600:
+            return dp(12)
+        else:
+            return dp(15) 
     
     @staticmethod
     def get_padding():
@@ -83,9 +117,75 @@ class ResponsiveHelper:
         width = Window.width
         if ResponsiveHelper.is_mobile() or width < 800:
             return [dp(10), dp(10)]
-        return [dp(20), dp(20)]
-
-
+        elif width < 1200:
+            return [dp(20), dp(20)]
+        elif width < 1600:
+            return [dp(25), dp(25)]
+        else:
+            return [dp(30), dp(30)]  # ⭐ Mayor padding en pantallas grandes
+    
+    @staticmethod
+    def get_popup_size():
+        """Retorna tamaño apropiado para popups"""
+        width = Window.width
+        height = Window.height
+        
+        if width < 600:
+            return (width * 0.9, min(height * 0.4, dp(300)))
+        elif width < 1200:
+            return (min(width * 0.6, dp(450)), min(height * 0.35, dp(250)))
+        elif width < 1600:
+            return (min(width * 0.5, dp(600)), min(height * 0.4, dp(350)))
+        else:
+            return (min(width * 0.4, dp(800)), min(height * 0.4, dp(450)))  # ⭐ Popups más grandes
+    
+    @staticmethod
+    def get_layout_orientation():
+        """Determina si el layout debe ser horizontal o vertical"""
+        return 'horizontal' if Window.width > Window.height and Window.width > 800 else 'vertical'
+    
+    @staticmethod
+    def get_button_height():
+        """Retorna altura de botones responsive"""
+        width = Window.width
+        if width < 600:
+            return dp(40)
+        elif width < 1200:
+            return dp(50)
+        elif width < 1600:
+            return dp(55)
+        else:
+            return dp(60) 
+    
+    @staticmethod
+    def get_score_font_size():
+        """⭐ Tamaño especial para números de puntaje (más grandes)"""
+        width = Window.width
+        if width < 800:
+            return sp(40)
+        elif width < 1200:
+            return sp(50)
+        elif width < 1600:
+            return sp(70)
+        elif width < 1920:
+            return sp(90)   # ⭐ Muy grande para Full HD
+        else:
+            return sp(120)  # ⭐ Extra grande para 4K
+    
+    @staticmethod
+    def get_form_width():
+        """Retorna ancho del formulario según pantalla"""
+        width = Window.width
+        if width < 600:
+            return 0.95
+        elif width < 900:
+            return 0.85
+        elif width < 1200:
+            return 0.75
+        elif width < 1600:
+            return 0.65
+        else:
+            return 0.55  
 # ------------------ BOTÓN CON EFECTO HOVER RESPONSIVE ------------------
 class HoverButton(Button):
     def __init__(self, **kwargs):
@@ -635,6 +735,10 @@ class MainInScreen(Screen):
 
 # ------------------ APLICACIÓN ------------------
 class MyApp(App):
+
+    LOGIN_SCREEN_NAME = 'main'
+    auth = None
+
     def build(self):
         # Configuración de ventana inicial multiplataforma
         if ResponsiveHelper.is_desktop():
@@ -678,6 +782,34 @@ class MyApp(App):
         )
         sm.add_widget(screen)
         sm.current = 'actualizar_torneos'
+
+    def logout(self, call_backend=True):
+        """
+        Cierra sesión de forma segura:
+        - Intenta informar al backend (si call_backend=True).
+        - Limpia token local y estado de auth.
+        - Navega a LOGIN_SCREEN_NAME.
+        """
+        try:
+            if call_backend:
+                try:
+                    api.post_logout()  # no interrumpimos si falla
+                except Exception:
+                    pass
+        finally:
+            # borra token y estado local
+            try:
+                api.clear_token()
+            except Exception:
+                pass
+            self.auth = None
+
+            # Navega de vuelta a la pantalla de landing/login
+            if self.root and self.root.has_screen(self.LOGIN_SCREEN_NAME):
+                self.root.current = self.LOGIN_SCREEN_NAME
+            elif self.root and getattr(self.root, 'screen_names', None):
+                # fallback defensivo
+                self.root.current = self.root.screen_names[0]
 
 
 if __name__ == '__main__':

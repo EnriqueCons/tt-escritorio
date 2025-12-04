@@ -18,6 +18,8 @@ from kivy.properties import ObjectProperty
 from kivy.utils import platform
 from datetime import datetime, date
 import calendar
+from api_client import api
+
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
 class ResponsiveHelper:
@@ -376,8 +378,46 @@ class ActualizarTorneoScreen(Screen):
         super().__init__(**kwargs)
         self.torneo_data = torneo_data
         self.on_save = on_save
+        self.torneo_completo = None  # Almacenará los datos completos del backend
+        self.cargar_datos_torneo()
         self.build_ui()
         Window.bind(on_resize=self.on_window_resize)
+    
+    def cargar_datos_torneo(self):
+        """Carga los datos completos del torneo desde el backend"""
+        try:
+            torneo_id = self.torneo_data.get('idTorneo')
+            
+            if torneo_id:
+                # Obtener el torneo completo del backend
+                self.torneo_completo = api.get_torneo_by_id(torneo_id)
+                print(f"[DEBUG] Torneo cargado desde backend: {self.torneo_completo}")
+                
+                # Actualizar torneo_data con los datos completos
+                if self.torneo_completo:
+                    # Parsear fechaHora del formato ISO a fecha y hora separadas
+                    fecha_hora_iso = self.torneo_completo.get('fechaHora', '')
+                    if fecha_hora_iso:
+                        try:
+                            # Formato esperado: "2025-11-24T07:30:00" o "2025-11-24T07:30"
+                            fecha_parte, hora_parte = fecha_hora_iso.split('T')
+                            # Convertir fecha de YYYY-MM-DD a DD/MM/YYYY
+                            year, month, day = fecha_parte.split('-')
+                            self.torneo_data['fecha'] = f"{day}/{month}/{year}"
+                            # Obtener hora en formato HH:MM
+                            self.torneo_data['hora_inicio'] = hora_parte[:5]  # Solo HH:MM
+                        except Exception as e:
+                            print(f"[ERROR] Error parseando fechaHora: {e}")
+                    
+                    self.torneo_data['nombre'] = self.torneo_completo.get('nombre', '')
+                    self.torneo_data['Sede'] = self.torneo_completo.get('sede', '')
+                    self.torneo_data['estado'] = self.torneo_completo.get('estado', 'PENDIENTE')
+                    self.torneo_data['administrador'] = self.torneo_completo.get('administrador')
+                    
+        except Exception as e:
+            print(f"[ERROR] Error cargando datos del torneo: {e}")
+            # Si falla, usar los datos que ya tenemos en torneo_data
+            self.torneo_completo = self.torneo_data
 
     def build_ui(self, *args):
         self.clear_widgets()
@@ -700,16 +740,75 @@ class ActualizarTorneoScreen(Screen):
             self.mostrar_mensaje("Error", "La hora de término debe ser posterior a la de inicio")
             return
 
-        nuevos_datos = {
-            'nombre': self.nombre_torneo_input.text,
-            'fecha': self.date_selector.get_formatted_date(),
-            'hora_inicio': self.time_start_selector.get_formatted_time(),
-            'hora_fin': self.time_end_selector.get_formatted_time(),
-            'Sede': self.sede_input.text
+        # Preparar fecha y hora en formato ISO 8601 para el backend
+        fecha_str = self.date_selector.get_formatted_date()
+        hora_inicio_str = self.time_start_selector.get_formatted_time()
+        
+        # Convertir DD/MM/YYYY HH:MM a formato ISO 8601: YYYY-MM-DDTHH:MM:SS
+        fecha_parts = fecha_str.split('/')
+        fecha_iso = f"{fecha_parts[2]}-{fecha_parts[1]}-{fecha_parts[0]}T{hora_inicio_str}:00"
+        
+        # Obtener el administrador del torneo completo cargado desde el backend
+        administrador = None
+        if self.torneo_completo and 'administrador' in self.torneo_completo:
+            administrador = self.torneo_completo['administrador']
+        
+        # Preparar el payload para el backend
+        # Según el controller, necesita: fechaHora, sede, estado, administrador
+        payload = {
+            'nombre': self.nombre_torneo_input.text.strip(),
+            'fechaHora': fecha_iso,
+            'sede': self.sede_input.text.strip(),
+            'estado': self.torneo_data.get('estado', 'PENDIENTE'),
+            'administrador': administrador  # Objeto completo del administrador
         }
         
-        self.on_save(self.torneo_data, nuevos_datos)
-        self.manager.current = 'torneos_anteriores'
+        print(f"[DEBUG] Payload a enviar: {payload}")
+        
+        try:
+            torneo_id = self.torneo_data.get('idTorneo')
+            
+            if not torneo_id:
+                self.mostrar_mensaje("Error", "No se pudo identificar el ID del torneo")
+                return
+            
+            print(f"[DEBUG] Actualizando torneo ID: {torneo_id}")
+            
+            # Actualizar el torneo en el backend
+            torneo_actualizado = api.update_torneo(torneo_id, payload)
+            
+            print(f"[DEBUG] Torneo actualizado: {torneo_actualizado}")
+            
+            # Preparar datos actualizados para la pantalla anterior
+            nuevos_datos = {
+                'nombre': self.nombre_torneo_input.text.strip(),
+                'fecha': fecha_str,
+                'hora_inicio': hora_inicio_str,
+                'hora_fin': self.time_end_selector.get_formatted_time(),
+                'Sede': self.sede_input.text.strip(),
+                'idTorneo': torneo_id,
+                'estado': payload['estado'],
+                'administrador': administrador
+            }
+            
+            # Llamar al callback on_save si existe
+            if self.on_save:
+                self.on_save(self.torneo_data, nuevos_datos)
+            
+            # Mostrar mensaje de éxito
+            self.mostrar_mensaje("Éxito", "El torneo se ha actualizado correctamente")
+            
+            # Volver a la pantalla anterior después de un breve delay
+            Clock.schedule_once(lambda dt: setattr(self.manager, 'current', 'torneos_anteriores'), 1.5)
+            
+        except RuntimeError as e:
+            print(f"[ERROR] RuntimeError: {e}")
+            self.mostrar_mensaje("Error", str(e))
+        except Exception as e:
+            print(f"[ERROR] Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            self.mostrar_mensaje("Error", f"Error al actualizar el torneo: {str(e)}")
 
     def cancelar(self, instance):
         self.manager.current = 'torneos_anteriores'

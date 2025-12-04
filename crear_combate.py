@@ -17,6 +17,64 @@ from kivy.properties import ObjectProperty
 from kivy.utils import platform
 from datetime import datetime, date
 import calendar
+from datetime import datetime
+from threading import Thread
+from kivy.clock import mainthread
+from api_client import api
+
+from datetime import datetime
+
+def join_date_time_iso(date_ddmmyyyy: str, time_hhmm: str) -> str:
+    # "dd/MM/YYYY" + "HH:MM" -> "YYYY-MM-DDTHH:MM:SS"
+    d = datetime.strptime(date_ddmmyyyy, "%d/%m/%Y").date()
+    t = datetime.strptime(time_hhmm, "%H:%M").time()
+    return datetime.combine(d, t).strftime("%Y-%m-%dT%H:%M:%S")
+
+def to_hhmmss_from_minsec(minutes: int, seconds: int) -> str:
+    total = minutes * 60 + seconds
+    hh = total // 3600
+    mm = (total % 3600) // 60
+    ss = total % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
+
+
+def ddmmyyyy_to_iso(dmy: str) -> str:
+    # "dd/mm/YYYY" -> "YYYY-mm-dd"
+    try:
+        d = datetime.strptime(dmy, "%d/%m/%Y")
+        return d.strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+def hhmm_to_hhmmss(hm: str) -> str:
+    # "HH:MM" -> "HH:MM:00"
+    try:
+        t = datetime.strptime(hm, "%H:%M")
+        return t.strftime("%H:%M:%S")
+    except Exception:
+        return datetime.now().strftime("%H:%M:%S")
+    
+def dividir_nombre_completo(nombre_completo: str) -> dict:
+    partes = nombre_completo.strip().split()
+    
+    if len(partes) == 0:
+        return {"nombres": "", "paterno": None, "materno": None}
+    elif len(partes) == 1:
+        # Solo un nombre
+        return {"nombres": partes[0], "paterno": None, "materno": None}
+    elif len(partes) == 2:
+        # Un nombre y un apellido
+        return {"nombres": partes[0], "paterno": partes[1], "materno": None}
+    elif len(partes) == 3:
+        # Un nombre y dos apellidos
+        return {"nombres": partes[0], "paterno": partes[1], "materno": partes[2]}
+    else:
+        # Más de 3 partes: asumimos que los últimos dos son apellidos
+        # y todo lo demás son nombres
+        apellido_materno = partes[-1]
+        apellido_paterno = partes[-2]
+        nombres = " ".join(partes[:-2])
+        return {"nombres": nombres, "paterno": apellido_paterno, "materno": apellido_materno}
 
 
 # ------------------ UTILIDADES RESPONSIVE ------------------
@@ -527,9 +585,6 @@ class CrearCombateScreen(Screen):
         n1_layout, self.nacionalidad1_input = crear_campo('Nacionalidad', 'Nacionalidad')
         form_container.add_widget(n1_layout)
         
-        pr_layout, self.peto_rojo_input = crear_campo('Peto Rojo ID', 'ID del peto rojo')
-        form_container.add_widget(pr_layout)
-        
         form_container.add_widget(Widget(size_hint_y=None, height=dp(20)))
         
         form_container.add_widget(crear_titulo_seccion('COMPETIDOR 2', 22))
@@ -553,8 +608,7 @@ class CrearCombateScreen(Screen):
         n2_layout, self.nacionalidad2_input = crear_campo('Nacionalidad', 'Nacionalidad')
         form_container.add_widget(n2_layout)
         
-        pa_layout, self.peto_azul_input = crear_campo('Peto Azul ID', 'ID del peto azul')
-        form_container.add_widget(pa_layout)
+   
         
         form_container.add_widget(Widget(size_hint_y=None, height=dp(20)))
 
@@ -588,7 +642,18 @@ class CrearCombateScreen(Screen):
         dd_layout, _ = crear_campo('Duración del Descanso', widget=self.duracion_descanso_selector)
         form_container.add_widget(dd_layout)
         
+        form_container.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        form_container.add_widget(crear_titulo_seccion('Contraseña'))
         form_container.add_widget(Widget(size_hint_y=None, height=dp(20)))
+        
+        # CONTRASEÑA
+        cp_layout, self.contrasena_input = crear_campo('Contraseña del Combate', 'Contraseña')
+        self.contrasena_input.password = True 
+        form_container.add_widget(cp_layout)
+
+        rcp_layout, self.repetir_contrasena_input = crear_campo('Repetir Contraseña', 'Confirmar contraseña')
+        self.repetir_contrasena_input.password = True  # Ocultar texto
+        form_container.add_widget(rcp_layout)
 
         # JUECES
         form_container.add_widget(crear_titulo_seccion('Jueces'))
@@ -786,6 +851,7 @@ class CrearCombateScreen(Screen):
         lista_campos.add_widget(btn_cerrar)
         popup.open()
 
+
     def crear_combate(self, instance):
         required_fields = [
             (self.competidor1_input, "Nombre(s) del Competidor 1"),
@@ -793,13 +859,11 @@ class CrearCombateScreen(Screen):
             (self.altura1_input, "Altura del Competidor 1 (cm)"),
             (self.sexo1_input, "Sexo del Competidor 1"),
             (self.nacionalidad1_input, "Nacionalidad del Competidor 1"),
-            (self.peto_rojo_input, "Peto Rojo ID"),
             (self.competidor2_input, "Nombre(s) del Competidor 2"),
             (self.peso2_input, "Peso del Competidor 2 (kg)"),
             (self.altura2_input, "Altura del Competidor 2 (cm)"),
             (self.sexo2_input, "Sexo del Competidor 2"),
             (self.nacionalidad2_input, "Nacionalidad del Competidor 2"),
-            (self.peto_azul_input, "Peto Azul ID"),
             (self.area_input, "Área de Combate"),
             (self.arbitro_nombre_input, "Nombre(s) del Árbitro Central"),
             (self.arbitro_Apellidos_input, "Apellidos del Árbitro Central"),
@@ -808,51 +872,227 @@ class CrearCombateScreen(Screen):
             (self.juez2_nombre_input, "Nombre(s) del Juez 2"),
             (self.juez2_Apellidos_input, "Apellidos del Juez 2"),
             (self.juez3_nombre_input, "Nombre(s) del Juez 3"),
-            (self.juez3_Apellidos_input, "Apellidos del Juez 3")
+            (self.juez3_Apellidos_input, "Apellidos del Juez 3"),
+            (self.contrasena_input, "Contraseña del Combate"),
+            (self.repetir_contrasena_input, "Repetir Contraseña")
         ]
 
-        campos_faltantes = [mensaje for campo, mensaje in required_fields if not campo.text.strip()]
-
+        campos_faltantes = [msg for campo, msg in required_fields if not campo.text.strip()]
         if campos_faltantes:
             self.mostrar_popup_campos_faltantes(campos_faltantes)
             return
 
+        if self.contrasena_input.text != self.repetir_contrasena_input.text:
+            self.mostrar_mensaje("Error", "Las contraseñas no coinciden")
+            return
+        
+        if len(self.contrasena_input.text) < 6:
+            self.mostrar_mensaje("Error", "La contraseña debe tener al menos 6 caracteres")
+
+        # Validaciones numéricas
         try:
-            float(self.peso1_input.text)
-            float(self.peso2_input.text)
+            float(self.peso1_input.text); float(self.peso2_input.text)
         except ValueError:
             self.mostrar_mensaje("Error", "Los pesos deben ser números válidos")
             return
 
         try:
-            float(self.altura1_input.text)
-            float(self.altura2_input.text)
+            float(self.altura1_input.text); float(self.altura2_input.text)
         except ValueError:
             self.mostrar_mensaje("Error", "Las alturas deben ser números válidos")
             return
 
-        fecha_combate = self.fecha_combate_selector.get_formatted_date()
-        hora_combate = self.hora_combate_selector.get_formatted_time()
+        # Recoger UI
+        fecha_combate_dmy = self.fecha_combate_selector.get_formatted_date()   # dd/mm/YYYY
+        hora_combate_hm   = self.hora_combate_selector.get_formatted_time()    # HH:MM
+        categoria_peso    = self.categoria_peso_selector.get_selected_category()
+        num_rounds        = self.rounds_selector.get_selected_rounds()
+        duracion_round    = self.duracion_round_selector.get_formatted_duration()     # M:SS
+        duracion_descanso = self.duracion_descanso_selector.get_formatted_duration()  # M:SS
+        fn1_dmy           = self.fecha_nac1_selector.get_formatted_date()
+        fn2_dmy           = self.fecha_nac2_selector.get_formatted_date()
+
+        dur_round_hhmmss = to_hhmmss_from_minsec(
+            self.duracion_round_selector.selected_minutes,
+            self.duracion_round_selector.selected_seconds
+        )
+
+        dur_desc_hhmmss = to_hhmmss_from_minsec(
+            self.duracion_descanso_selector.selected_minutes,
+            self.duracion_descanso_selector.selected_seconds
+        )
+
+        hora_combate_iso = join_date_time_iso(fecha_combate_dmy, hora_combate_hm)
+
+        # Transformar a ISO
+        fecha_iso = ddmmyyyy_to_iso(fecha_combate_dmy)
+        hora_iso  = hhmm_to_hhmmss(hora_combate_hm)
+        fn1_iso   = ddmmyyyy_to_iso(fn1_dmy)
+        fn2_iso   = ddmmyyyy_to_iso(fn2_dmy)
+
+        nombre_comp1 = dividir_nombre_completo(self.competidor1_input.text.strip())
+        nombre_comp2 = dividir_nombre_completo(self.competidor2_input.text.strip())
+
+        payload = {
+            "competidorRojo": {
+                "nombreAlumno": nombre_comp1["nombres"],
+                "paternoAlumno": nombre_comp1["paterno"],
+                "maternoAlumno": nombre_comp1["materno"],
+                "fechaNacimiento": fn1_iso,
+                "pesoKg": float(self.peso1_input.text),
+                "alturaCm": float(self.altura1_input.text),
+                "sexo": self.sexo1_input.text.strip(),
+                "nacionalidad": self.nacionalidad1_input.text.strip()
+            },
+            "competidorAzul": {
+                "nombreAlumno": nombre_comp2["nombres"],
+                "paternoAlumno": nombre_comp2["paterno"],
+                "maternoAlumno": nombre_comp2["materno"],
+                "fechaNacimiento": fn2_iso,
+                "pesoKg": float(self.peso2_input.text),
+                "alturaCm": float(self.altura2_input.text),
+                "sexo": self.sexo2_input.text.strip(),
+                "nacionalidad": self.nacionalidad2_input.text.strip()
+            },
+            "fechaCombate": fecha_iso,
+            "numeroRound": num_rounds,
+            "horaCombate": hora_combate_iso,
+            "area": self.area_input.text.strip(),
+            "categoria": categoria_peso,
+            "estado": "EN_CURSO",
+            "numeroRounds": num_rounds,
+            "duracionRound": dur_round_hhmmss,
+            "duracionDescanso": dur_desc_hhmmss,
+            "contrasenaCombate": self.contrasena_input.text.strip(),
+            "jueces": {
+                "arbitroCentral": {
+                    "nombres": self.arbitro_nombre_input.text.strip(),
+                    "apellidos": self.arbitro_Apellidos_input.text.strip()
+                },
+                "juez1": {
+                    "nombres": self.juez1_nombre_input.text.strip(),
+                    "apellidos": self.juez1_Apellidos_input.text.strip()
+                },
+                "juez2": {
+                    "nombres": self.juez2_nombre_input.text.strip(),
+                    "apellidos": self.juez2_Apellidos_input.text.strip()
+                },
+                "juez3": {
+                    "nombres": self.juez3_nombre_input.text.strip(),
+                    "apellidos": self.juez3_Apellidos_input.text.strip()
+                }
+            }
+        }
+
+        # Popup "cargando"
+        loading = Popup(
+            title="Creando combate...",
+            content=Label(text="Enviando datos al servidor"),
+            size_hint=(None, None),
+            size=ResponsiveHelper.get_popup_size()
+        )
+        loading.open()
+
+        def work():
+            try:
+                try:
+                    ultimo_torneo = api.get_ultimo_torneo()
+                    if ultimo_torneo:
+                        print(f"[CrearCombate] Usando torneo: {ultimo_torneo.get('nombre')} (ID: {ultimo_torneo.get('idTorneo')})")
+                except:
+                    pass  # No es crítico si falla
+                
+                creado = api.create_combate(payload)         # POST
+                combate_id = creado.get("id") or creado.get("idCombate")
+                if not combate_id:
+                    raise RuntimeError("El servidor no devolvió un id de combate.")
+
+                torneo_asignado = creado.get("idTorneo")
+                if torneo_asignado:
+                    print(f"[CrearCombate] Combate asignado al torneo ID: {torneo_asignado}")
+                else:
+                    print("[CrearCombate] ADVERTENCIA: No se asignó ningún torneo al combate")
+
+                api.prepare_combate(int(combate_id))         # POST /prepare
+                self._on_success(creado, fecha_combate_dmy, hora_combate_hm)
+            except Exception as e:
+                self._on_error(str(e))
+            finally:
+                self._close_loading(loading)
+
+        Thread(target=work, daemon=True).start()
+
+    @mainthread
+    def _close_loading(self, popup):
+        try:
+            popup.dismiss()
+        except:
+            pass
+
+    @mainthread
+    def _on_success(self, creado, fecha_dmy, hora_hm):
+        """Callback cuando el combate se crea exitosamente"""
+        c1 = self.competidor1_input.text
+        c2 = self.competidor2_input.text
         categoria_peso = self.categoria_peso_selector.get_selected_category()
         num_rounds = self.rounds_selector.get_selected_rounds()
         duracion_round = self.duracion_round_selector.get_formatted_duration()
         duracion_descanso = self.duracion_descanso_selector.get_formatted_duration()
+        combate_id = creado.get("id") or creado.get("idCombate", "—")
 
+        # Mostrar mensaje de éxito
         self.mostrar_mensaje(
             "¡Combate creado!",
-            f"El combate entre {self.competidor1_input.text} y {self.competidor2_input.text} ha sido creado con éxito\n"
-            f"Categoría de peso: {categoria_peso}\n"
-            f"Número de rounds: {num_rounds}\n"
-            f"Duración round: {duracion_round}\n"
-            f"Duración descanso: {duracion_descanso}\n"
-            f"Fecha: {fecha_combate} a las {hora_combate}\n"
+            ( f"ID: {combate_id}\n"
+            f"{c1} vs {c2}\n"
+            f"Categoría: {categoria_peso}\n"
+            f"Rounds: {num_rounds} | Round: {duracion_round} | Descanso: {duracion_descanso}\n"
+            f"Fecha: {fecha_dmy} a las {hora_hm}\n"
             f"Área: {self.area_input.text}\n"
-            f"La contraseña que debes compartir es 36782398"
+            f"Servidor listo para conexiones WebSocket.")
         )
 
+       
+        app = App.get_running_app()
+        sm = app.root
+        
+        if sm and sm.has_screen('tablero_central'):
+            tablero = sm.get_screen('tablero_central')
+            
+            # Preparar datos del combate desde la respuesta del backend
+            combate_data = {
+                'idCombate': creado.get('idCombate') or creado.get('id'),
+                'id': creado.get('id') or creado.get('idCombate'),
+                'idAlumnoRojo': creado.get('idAlumnoRojo'), 
+                'idAlumnoAzul': creado.get('idAlumnoAzul'), 
+                'duracionRound': creado.get('duracionRound'),     
+                'duracionDescanso': creado.get('duracionDescanso'), 
+                'numeroRounds': creado.get('numeroRounds')        
+            }
+            
+            
+            # Configurar el tablero con todos los datos
+            tablero.set_competitors(
+                name1=self.competidor1_input.text.strip(),
+                nat1=self.nacionalidad1_input.text.strip(),
+                name2=self.competidor2_input.text.strip(),
+                nat2=self.nacionalidad2_input.text.strip(),
+                combate_data=combate_data
+            )
+            
+            # Cambiar a la pantalla del tablero
+            sm.current = 'tablero_central'
+            
+            print(f"[SUCCESS] Tablero configurado correctamente")
+        
+        # Limpiar campos del formulario
         for widget in self.walk():
             if isinstance(widget, TextInput):
                 widget.text = ""
+
+    @mainthread
+    def _on_error(self, msg):
+        self.mostrar_mensaje("Error", f"Ocurrió un problema al crear o preparar el combate:\n{msg}")
 
     def volver_a_principal(self, instance):
         App.get_running_app().root.current = 'ini'
