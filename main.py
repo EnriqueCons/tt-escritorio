@@ -255,6 +255,7 @@ class Navbar(BoxLayout):
             ("Manual de usuario", self.descargar_manual),
             ("Contáctanos", self.enviar_correo),
             ("Conócenos", self.ir_a_conocenos),
+           # ("Pruebas", self.ir_a_pruebas),
         ]
 
         for text, action in menu_items:
@@ -292,10 +293,12 @@ class Navbar(BoxLayout):
             webbrowser.open(manual_path)
 
     def enviar_correo(self, instance):
-        webbrowser.open("mailto:karlycid0925@gmail.com")
+        webbrowser.open("mailto:petoelectronicott@gmail.com")
 
     def ir_a_conocenos(self, instance):
         App.get_running_app().root.current = 'conocenos'
+    #def ir_a_pruebas(self, instance):
+     #   App.get_running_app().root.current = 'conocenos'
 
 
 # ------------------ LABEL RESPONSIVE ------------------
