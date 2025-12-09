@@ -350,7 +350,7 @@ class InicioSesionScreen(Screen):
         form_container.add_widget(Widget(size_hint_y=None, height=dp(10)))
 
         # Enlace recuperar contraseña
-        recuperar_label = EnlaceRecuperar(
+        """recuperar_label = EnlaceRecuperar(
             text='¿Olvidaste tu contraseña?',
             font_size=ResponsiveHelper.get_font_size(16),
             color=(0.1, 0.4, 0.7, 1),
@@ -359,7 +359,7 @@ class InicioSesionScreen(Screen):
             height=dp(40)
         )
         recuperar_label.bind(on_press=self.mostrar_popup_usuario)
-        form_container.add_widget(recuperar_label)
+        form_container.add_widget(recuperar_label)"""
 
         main_layout.add_widget(form_container)
         

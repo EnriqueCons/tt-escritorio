@@ -281,7 +281,7 @@ class Navbar(BoxLayout):
 
     def descargar_manual(self, instance):
         # Manejo multiplataforma de rutas
-        manual_path = "ilovepdf_merged (2)[1].pdf"
+        manual_path = "Manual de usuario PETOTECH.pdf"
         if os.path.exists(manual_path):
             if platform == 'win':
                 os.startfile(manual_path)
