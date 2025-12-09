@@ -740,12 +740,6 @@ class CenterPanel(BoxLayout):
 
         if self.round_number >= self.numero_rounds:
             print(f"[CenterPanel] Todos los rounds completados ({self.numero_rounds})")
-            self.end_combat_automatically()  # ← Esta línea llama al método
-            return
-        
-        # Verificar si hay rounds disponibles
-        if self.round_number >= self.numero_rounds:
-            print(f"[CenterPanel] Todos los rounds completados ({self.numero_rounds})")
             self.end_combat_automatically()
             return
         
@@ -757,7 +751,7 @@ class CenterPanel(BoxLayout):
         
         # Resetear el estado del combate
         self.is_rest_time = False
-        self.combat_started = False  #  CAMBIO: False para que no permita puntos aún
+        self.combat_started = False
         self.remaining_time = self.duracion_round
         minutes = self.remaining_time // 60
         seconds = self.remaining_time % 60
@@ -772,12 +766,7 @@ class CenterPanel(BoxLayout):
         if hasattr(self, 'parent_screen') and self.parent_screen:
             self.parent_screen.reset_competitor_scores()
         
-        
-        # ✅ MANTENER PAUSADO: El usuario debe presionar INICIAR
         print(f"[CenterPanel] ⏸ Round {self.round_number} listo - Presiona INICIAR para comenzar")
-
-
-
 
     def end_combat_automatically(self):
         """Finaliza el combate automáticamente cuando se terminan todos los rounds"""
@@ -800,7 +789,7 @@ class CenterPanel(BoxLayout):
         )
 
     def end_combat_by_disqualification(self, player_name):
-        """Termina el combate por descalificación (5 GAM-JEOM)"""
+        """Termina el combate por descalificación (3 GAM-JEOM)"""
         self.pause_timer()
         self.combat_started = False
         self.time_str = "FIN"
@@ -962,14 +951,13 @@ class MainScreentabc(Screen):
         self.ws_keepalive = None
         
         self.build_ui()
-        # Window.bind(on_resize=self.on_window_resize)
     
     def set_competitors(self, name1, nat1, name2, nat2, combate_data=None):
         """Configura los competidores y datos del combate"""
         print("\n" + "=" * 60)
         print("[MainScreentabc] 🥋 CONFIGURANDO COMPETIDORES")
-        print(f"  🔴 Rojo: {name1} ({nat1})")
         print(f"  🔵 Azul: {name2} ({nat2})")
+        print(f"  🔴 Rojo: {name1} ({nat1})")
         
         if combate_data:
             self.combate_id = combate_data.get('idCombate') or combate_data.get('id')
@@ -1028,16 +1016,16 @@ class MainScreentabc(Screen):
         orientation = ResponsiveHelper.get_layout_orientation()
         main_layout = BoxLayout(orientation=orientation, spacing=0)
         
-        # Panel Competidor Rojo
-        self.com1_panel = CompetitorPanel(
-            name=name1,
-            color="#E53935",
-            nationality=nat1,
-            alumno_id=self.id_alumno_rojo,
+        # Panel Competidor Azul (IZQUIERDA)
+        self.com2_panel = CompetitorPanel(
+            name=name2,
+            color="#1E88E5",
+            nationality=nat2,
+            alumno_id=self.id_alumno_azul,
             combate_id=self.combate_id
         )
-        self.com1_panel.parent_screen = self 
-        main_layout.add_widget(self.com1_panel)
+        self.com2_panel.parent_screen = self
+        main_layout.add_widget(self.com2_panel)
 
         # Panel Central
         self.center_panel = CenterPanel(
@@ -1048,16 +1036,16 @@ class MainScreentabc(Screen):
         self.center_panel.parent_screen = self
         main_layout.add_widget(self.center_panel)
 
-        # Panel Competidor Azul
-        self.com2_panel = CompetitorPanel(
-            name=name2,
-            color="#1E88E5",
-            nationality=nat2,
-            alumno_id=self.id_alumno_azul,
+        # Panel Competidor Rojo (DERECHA)
+        self.com1_panel = CompetitorPanel(
+            name=name1,
+            color="#E53935",
+            nationality=nat1,
+            alumno_id=self.id_alumno_rojo,
             combate_id=self.combate_id
         )
-        self.com2_panel.parent_screen = self
-        main_layout.add_widget(self.com2_panel)
+        self.com1_panel.parent_screen = self
+        main_layout.add_widget(self.com1_panel)
 
         self.add_widget(main_layout)
     
@@ -1070,7 +1058,6 @@ class MainScreentabc(Screen):
     def on_combat_started(self):
         """Callback cuando el combate inicia"""
         print("[MainScreentabc] 🟢 Combate iniciado - Puntos y faltas ahora serán aceptados")
-        # Cargar faltas iniciales
         self.fetch_initial_gamjeom()
 
     def on_player_disqualified(self, alumno_id, player_name):
@@ -1110,13 +1097,11 @@ class MainScreentabc(Screen):
                     alumno_id = data.get('alumnoId')
                     new_count = data.get('count', 0)
                     
-                    # VERIFICAR SI EL TIMER ESTÁ ACTIVO
                     if not self.is_timer_active():
                         print(f"[WebSocket] ⚠️ Timer NO activo - Eliminando punto de alumno {alumno_id}")
                         self.revert_score(alumno_id)
                         return
                     
-                    # Timer activo - Actualizar el panel correspondiente
                     if alumno_id == self.id_alumno_rojo:
                         print(f"[WebSocket] 🔴 Actualizando ROJO: {new_count}")
                         self.com1_panel.update_api_score(new_count)
@@ -1277,18 +1262,7 @@ class MainScreentabc(Screen):
         orientation = ResponsiveHelper.get_layout_orientation()
         main_layout = BoxLayout(orientation=orientation, spacing=0)
         
-        self.com1_panel = CompetitorPanel(
-            name="COMPETIDOR 1",
-            color="#E53935",
-            nationality=""
-        )
-        self.com1_panel.parent_screen = self
-        main_layout.add_widget(self.com1_panel)
-
-        self.center_panel = CenterPanel()
-        self.center_panel.parent_screen = self
-        main_layout.add_widget(self.center_panel)
-
+        # Panel Azul a la IZQUIERDA
         self.com2_panel = CompetitorPanel(
             name="COMPETIDOR 2",
             color="#1E88E5",
@@ -1296,6 +1270,19 @@ class MainScreentabc(Screen):
         )
         self.com2_panel.parent_screen = self
         main_layout.add_widget(self.com2_panel)
+
+        self.center_panel = CenterPanel()
+        self.center_panel.parent_screen = self
+        main_layout.add_widget(self.center_panel)
+
+        # Panel Rojo a la DERECHA
+        self.com1_panel = CompetitorPanel(
+            name="COMPETIDOR 1",
+            color="#E53935",
+            nationality=""
+        )
+        self.com1_panel.parent_screen = self
+        main_layout.add_widget(self.com1_panel)
 
         self.add_widget(main_layout)
 
@@ -1342,6 +1329,8 @@ if __name__ == '__main__':
                 )
                 
                 print("\n✅ TABLERO CONFIGURADO")
+                print("  🔵 AZUL (Kim Min-ho) - IZQUIERDA")
+                print("  🔴 ROJO (Juan Pérez) - DERECHA")
                 print("  IMPORTANTE: Debes presionar INICIAR para que cuenten los puntos")
                 print(" Los puntajes se actualizan en tiempo real via WebSocket")
                 print(" Los botones +/- guardan directamente en la BD")
