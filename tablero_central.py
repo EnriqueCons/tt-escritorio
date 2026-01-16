@@ -1114,6 +1114,11 @@ class MainScreentabc(Screen):
                         print(f"[WebSocket] 🔵 Actualizando AZUL: {new_count}")
                         self.com2_panel.update_api_score(new_count)
                 
+                elif data.get('event') == 'incidencia_confirmada':
+                    print(f"[WebSocket] 🚨 INCIDENCIA CONFIRMADA - Pausando combate")
+                    self.pausar_tiempo()
+                    self.mostrar_popup_incidencia()
+                
                 elif data.get('status') == 'connected':
                     print(f"[WebSocket] ✓ Conectado al combate {data.get('combateId')}")
                     self.fetch_initial_scores()
